@@ -1,0 +1,130 @@
+ITGMANIA: HOW A STEPFILE IS MATCHED TO A SCORE IN A PROFILE
+FILE STATUS
+ Status:     NEW 2026-10-25, ACTIVE read-only findings. Nothing built or run (Claude cannot run the game).
+ Revision:   2026-10-25-b | file: notes/itgmania_score_matching_findings.txt
+ Basis:      engine v1.3.0 (8a3bf8884a). Beta NOT checked.
+ Topic key:  score  (cite as "score:3" etc.)
+ Read when:  questions about renaming/moving/editing songs and keeping scores; Stats.xml; edit charts.
+ See also:   engine notes (Song loading), loadmem:4 (caches), cache format spec section 5 (chart key hash),
+             sketch Part A6 (profile loader keeps scores for songs that are not loaded).
+Tags: [CODE] read in source  [INFERRED] reasoned, not tested  [UNVERIFIED]  [TESTED] user-run
+
+1. ANSWER
+ A score is stored under TWO keys, both in the Profile (player or machine, same code):
+  (a) SongID = the song FOLDER PATH string (e.g. "Songs/Pack/Song/"). [CODE]
+  (b) StepsID = steps type (dance-single ...) + difficulty. For Difficulty_Edit charts only, also the
+      chart description text and a CRC32 hash of the note data. [CODE]
+ Nothing else is in the key. Title, subtitle, artist, credit, .sm/.ssc/.dwi file name, meter (foot rating),
+ BPMs, stops, offset, banner, music file name are NOT part of the match. [CODE]
+ So an edit that changes only those leaves the song and chart "the same" for scoring.
+ What makes a song or chart look NEW (old scores stay in Stats.xml but are no longer shown):
+  - the song folder path changes (rename or move the folder or its pack folder, case included) [CODE]
+  - a chart's steps type or difficulty changes [CODE]
+  - for an Edit-difficulty chart: description changes, or its note data changes [CODE; hash detail INFERRED, see 5]
+
+2. SONG KEY: SongID  [CODE]
+ - SongID::FromSong (SongUtil.cpp:1462) stores Song::GetSongDir() (m_sSongDir), minus one leading "/".
+ - Stored in Stats.xml as <Song Dir="..."> (SongID::CreateNode, SongUtil.cpp:1491).
+ - The profile maps are std::map<SongID, ...> with SongID::operator< = plain std::string compare of sDir
+   (SongUtil.h:236). That is EXACT and CASE-SENSITIVE. Renaming "Songs/Pack/Foo/" to "Songs/Pack/foo/" gives a
+   different key for score writing and reading in the profile map. [CODE]
+ - SongID::ToSong (SongUtil.cpp:1477) -> SongManager::GetSongFromDir (SongManager.cpp:1812): adds trailing "/",
+   "\" -> "/", lower-cases, looks up m_SongsByDir. This turns a stored ID back into a loaded Song
+   (case-insensitive), but the score lookup in Profile::GetStepsHighScoreList (Profile.cpp:620) does NOT go
+   through ToSong: it builds the SongID from the live Song and indexes the map directly. [CODE]
+   Consequence [INFERRED]: if only the CASE of a folder name changes, the old scores sit under the old-case key
+   and the song shows no scores (new key, empty list); not tested.
+ - SongID::LoadFromNode rewrites a leading "AdditionalSongs/" to "Songs/" (backward compat, SongUtil.cpp:1503). [CODE]
+ - Custom (downloaded) songs: m_sSongDir is replaced by custom_songify_path() (Song.cpp:417-418), so their key
+   is that rewritten path. [CODE; behaviour of that function not read]
+ - The song's file name (.sm vs .ssc vs .dwi) is not in the path key. A folder whose .sm is replaced by an .ssc
+   keeps its SongID. [INFERRED from the key; loader choice not tested]
+ - Scores for a SongID with no loaded song are kept: LoadSongScoresFromNode accepts invalid songs on purpose
+   (Profile.cpp:2112-2116, comment about AdditionalSongsFolders), and the save loop (Profile.cpp:2070-2100) only
+   skips songs/steps with zero plays, not unloaded songs. They return if the same path reappears. [CODE]
+
+3. CHART KEY: StepsID  [CODE]
+ - StepsID::FromSteps (StepsUtil.cpp:291): st = m_StepsType, dc = GetDifficulty().
+   If dc == Difficulty_Edit: sDescription = GetDescription(), uHash = GetHash(). Otherwise description "" and
+   hash 0, i.e. NON-EDIT charts are keyed by steps type + difficulty ONLY.
+ - Stored as <Steps StepsType= Difficulty= [Description= Hash=]> (StepsID::CreateNode).
+ - Compare: operator< / operator== compare st, dc, sDescription, and uHash only when BOTH hashes are nonzero
+   (StepsUtil.cpp:390-415; the header comment explains: themes look up scores with a Steps whose hash is 0, so
+   0 acts as a wildcard).
+ - Consequences:
+   * Changing the METER of a Beginner..Challenge chart keeps its scores. [CODE]
+   * Changing the NOTES of a Beginner..Challenge chart keeps its scores (same key). [CODE] The old scores then
+     belong to different steps; the engine does not detect it. (GrooveStats uses a separate chart hash, see 6.)
+   * Two charts with the same steps type + difficulty in one song (e.g. two Challenge) share one score list
+     [INFERRED from the key; whether the loader rejects/renames duplicates not checked].
+   * Changing a chart's DIFFICULTY label (Hard -> Challenge) = a new chart key. [CODE]
+   * Changing the STEPS TYPE (dance-single -> dance-double) = new key. [CODE]
+   * Edit charts: description text and note-data hash both must match (when the stored hash is nonzero).
+
+4. HOW EACH LOADER PRODUCES THE KEY FIELDS
+ .sm (NotesLoaderSM.cpp:290-328) [CODE]
+  - Notes block fields: type, description, difficulty, meter, radar, notedata.
+  - Steps type string -> m_StepsType ("para" -> "para-single" hack).
+  - Difficulty = OldStyleStringToDifficulty(text) (Difficulty.cpp:55-88): beginner, easy/basic/light,
+    medium/another/trick/standard/difficult, hard/ssr/maniac/heavy, smaniac/challenge/expert/oni, edit.
+    Unknown text -> Difficulty_Invalid.
+  - HACK: a chart read as Hard whose DESCRIPTION is "smaniac" or "challenge" (any case) becomes Challenge.
+    So editing the description of a Hard chart to/from those words changes its key. [CODE]
+  - Description is also copied to Credit and ChartName. Only the description matters for the key, and only for Edit.
+ .ssc (NotesLoaderSSC.cpp:305-316) [CODE]
+  - #DESCRIPTION: for files older than VERSION_CHART_NAME_TAG (and not loading an edit) the text goes to
+    ChartName, not Description; otherwise to Description. #DIFFICULTY uses StringToDifficulty (new names).
+    [INFERRED: for old-version .ssc files an Edit chart's description may therefore be empty; not tested.]
+ .dwi (NotesLoaderDWI.cpp:225-273, 525-545) [CODE]
+  - Difficulty from the DWI mode word via DwiCompatibleStringToDifficulty: BEGINNER, BASIC/LIGHT/ESY..,
+    ANOTHER/STANDARD.., MANIAC/HEAVY.., SMANIAC/CHALLENGE/EXPERT/ONI (-> Challenge), "edit" -> Edit.
+  - The DWI loader never calls SetDescription, so a DWI Edit chart has an EMPTY description [CODE: no
+    SetDescription in NotesLoaderDWI.cpp]. Its Edit key is therefore (type, Edit, "", hash of notes).
+  - Meter = the feet number; not in the key.
+  - DWI fields that do NOT matter for scores: #TITLE, #ARTIST, #BPM, #GAP, #FREEZE, #CHANGEBPM, #DISPLAYTITLE.
+ Neither format: song title/artist/BPM/stops/offset appear in any key. [CODE]
+
+5. EDIT-CHART HASH (what "note data changed" means)  [CODE + INFERRED]
+ - Steps::GetHash (Steps.cpp:137) = CRC32 (GetHashForString, RageUtil.cpp:873) of m_sNoteDataCompressed; if that
+   string is empty and the data is not decompressed it returns 0 ("no data, no hash"); the value is cached in m_iHash.
+ - m_sNoteDataCompressed is the raw NOTES text just after a file load (SetSMNoteData), but is cleared by
+   Steps::Compress() when the chart has a file on disk, and regenerated from parsed NoteData
+   (NoteDataUtil::GetSMNoteDataString, with "// measure N" comments, normalized row spacing) the next time the
+   chart is decompressed (Steps::Decompress -> GetSMNoteData).
+ - [INFERRED] So the hash that is SAVED when an edit is played is most likely the hash of the normalized
+   regenerated text: pure formatting changes (whitespace, comments, row quantization the parser would normalize)
+   would not change it; any change to which notes exist, where, or their types would. Whether the raw-text hash
+   and the normalized-text hash can both occur for the same chart (e.g. before/after first decompress) was NOT
+   traced. The wildcard rule (hash 0 matches any) hides this on display lookups.
+ - Timing data (BPM, stops, offset) is not in this string, so changing only timing does not change the hash. [CODE]
+ - A chart loaded from a player's profile edits folder follows the same logic.
+
+6. THE GROOVESTATS CHART HASH IS NOT THE PROFILE KEY
+ - Steps::GetChartKey / GrooveStats hash (SHA-1, first 16 hex chars; minimized note data + BPM segments;
+   ignores stops, warps, delays, offset, labels; cache spec section 5; Steps.cpp ~740-843) identifies a chart
+   online. Profile score storage uses SongID/StepsID only. [CODE for Profile; GS usage not re-read this session.]
+
+7. OTHER EFFECTS OF EDITING A SIMFILE (not identity)
+ - The song cache (Cache/Songs) is keyed by folder path and revalidated by a directory hash (mtime + size);
+   editing a file forces a re-parse, not a new song identity. [CODE: Song.cpp:307-314]
+ - Songs moved between packs: new SongID (path includes the pack folder). Old Stats.xml entries remain.
+ - Other per-song profile data (last played, favorites) probably use the same SongID. [INFERRED: only
+   Profile::m_SongHighScores read.] Course scores use a different key [UNVERIFIED; not read].
+
+8. RECOMMENDED IN-GAME CHECKS (user-run; Claude cannot run the game)
+ S1. Play a song once so it has a score. Edit only #TITLE (or #ARTIST), reload songs. Predict: scores kept.
+ S2. Change only the meter of a Challenge chart. Predict: scores kept.
+ S3. Change a few notes of a non-Edit chart. Predict: scores kept (now for different steps).
+ S4. Rename the song FOLDER (one letter). Predict: empty scores; rename back and they return.
+ S5. Rename only the CASE of the folder (Foo -> foo). Predict: scores vanish (see 2).
+ S6. Change a chart's difficulty label Hard -> Challenge. Predict: empty scores for that slot.
+ S7. Create an Edit chart, play it, change its description (new key), then change one note (new hash).
+     Predict: scores disappear each time; reverting restores them.
+ S8. Same as S7 with only whitespace/comment changes in the NOTES text. Predict: scores kept (see 5).
+ S9. Move the song to another pack folder. Predict: empty scores.
+ To inspect directly: open the profile's Stats.xml, <SongScores>, <Song Dir="..."> and
+ <Steps StepsType= Difficulty= [Description= Hash=]> nodes.
+
+9. OPEN
+ - Beta not diffed. Course score key not read. Whether duplicate type+difficulty charts are rejected during song
+   loading not read. Raw-vs-normalized hash question (section 5) not traced.

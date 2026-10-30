@@ -1,0 +1,188 @@
+diff --git a/Themes/_fallback/Languages/en.ini b/Themes/_fallback/Languages/en.ini
+index 98a63087fa..c927435081 100644
+--- a/Themes/_fallback/Languages/en.ini
++++ b/Themes/_fallback/Languages/en.ini
+@@ -531,7 +531,9 @@ TextureColorDepth=Choose the color depth of textures. 32 bit textures use more m
+ Theme=Choose from this list of installed theme packs.
+ ThreeKeyNavigation=&oq;Five Key&oq;: L/R/D/U menu buttons and Start.  &oq;Three Key&oq;: L/R menu buttons and Start.
+ TimingWindowScale=Increase this value to cause your steps to be judged more strictly (i.e. shrink the timing window).
++Toggle Pack=Left/Right: turn this pack On or Off. Start: choose which songs in the pack are on. A pack that was off needs Reload Songs after it is turned On.
+ Toggle Song=Toggle Song
++Toggle Songs=Turn song packs and individual songs on or off.
+ Turn=Turn
+ Transfer Edits to USB=Transfer Edits to USB
+ Transfer Edits from USB=Transfer Edits from USB
+@@ -1229,6 +1231,7 @@ RateModPreservesPitch=Rate Mod Preserves Pitch
+ Record in selection=Record in selection
+ RefreshRate=Refresh Rate
+ Reload Songs=Reload Songs/Courses
++Toggle Songs=Toggle Songs
+ Remove=Remove
+ RemoveCombinations=Remove
+ RemoveFeatures=
+@@ -2685,6 +2688,10 @@ HeaderText=Test Input
+ HeaderText=!
+ [ScreenOptionsManageProfiles]
+ HeaderText=Profiles
++[ScreenOptionsToggleSongs]
++HeaderText=Toggle Songs
++[ScreenOptionsToggleSongsSubPage]
++HeaderText=Toggle Songs
+ [ScreenOptionsSystemDirection]
+ HeaderText=System Direction
+ [ScreenOptionsUI]
+diff --git a/Themes/_fallback/metrics.ini b/Themes/_fallback/metrics.ini
+index 2aa8e2e6e0..901370e3e0 100644
+--- a/Themes/_fallback/metrics.ini
++++ b/Themes/_fallback/metrics.ini
+@@ -2782,13 +2782,14 @@ Fallback="ScreenOptionsSimpleService"
+ NextScreen=Branch.AfterInit()
+ PrevScreen=Branch.AfterInit()
+ 
+-LineNames="GameType,GraphicSound,KeyConfig,Arcade,InputOptions,SoundGraphics,Profiles,Advanced,Reload,Credits"
++LineNames="GameType,GraphicSound,KeyConfig,Arcade,InputOptions,SoundGraphics,Profiles,Advanced,ToggleSongs,Reload,Credits"
+ 
+ LineSync="gamecommand;screen,ScreenGameplaySyncMachine;name,Calibrate Machine Sync"
+ LineGameType="gamecommand;screen,ScreenSelectGame;name,Select Game"
+ LineKeyConfig="gamecommand;screen,ScreenMapControllers;name,Key Joy Mappings"
+ LineTestInput="gamecommand;screen,ScreenTestInput;name,Test Input"
+ LineInput="gamecommand;screen,ScreenOptionsInput;name,Input Options"
++LineToggleSongs="gamecommand;screen,ScreenOptionsToggleSongs;name,Toggle Songs"
+ LineReload="gamecommand;screen,ScreenReloadSongs;name,Reload Songs"
+ LineArcade="gamecommand;screen,ScreenOptionsArcade;name,Arcade Options"
+ LineAppearance="gamecommand;screen,ScreenAppearanceOptions;name,Appearance Options"
+@@ -3255,6 +3256,18 @@ NextScreen=Branch.TitleMenu()
+ LineNames="1"
+ Line1="conf,Game"
+ 
++[ScreenOptionsToggleSongs]
++Class="ScreenOptionsToggleSongs"
++Fallback="ScreenOptionsSimpleService"
++PrevScreen="ScreenOptionsService"
++NextScreen="ScreenOptionsService"
++
++[ScreenOptionsToggleSongsSubPage]
++Class="ScreenOptionsToggleSongsSubPage"
++Fallback="ScreenOptionsSimpleService"
++PrevScreen="ScreenOptionsToggleSongs"
++NextScreen="ScreenOptionsToggleSongs"
++
+ [ScreenOptionsManageProfiles]
+ Class="ScreenOptionsManageProfiles"
+ Fallback="ScreenOptionsSimpleService"
+diff --git a/src/ScreenOptionsToggleSongs.cpp b/src/ScreenOptionsToggleSongs.cpp
+index e2e4015ff4..8a0cdf83a4 100644
+--- a/src/ScreenOptionsToggleSongs.cpp
++++ b/src/ScreenOptionsToggleSongs.cpp
+@@ -21,19 +21,23 @@ void ScreenOptionsToggleSongs::BeginScreen() {
+ 
+   std::vector<OptionRowHandler*> vHands;
+ 
++  // Packs on disk (including ones skipped at load because they are disabled)
++  // plus loaded groups.
+   std::vector<std::string> asAllGroups;
+-  SONGMAN->GetSongGroupNames(asAllGroups);
++  SONGMAN->GetAllPackFolderNames(asAllGroups);
+   for (const std::string& sGroup : asAllGroups) {
+     vHands.push_back(OptionRowHandlerUtil::MakeNull());
+     OptionRowDefinition& def = vHands.back()->m_Def;
+ 
+     def.m_sName = sGroup;
+-    def.m_sExplanationName = "Select Group";
++    def.m_sExplanationName = "Toggle Pack";
+     def.m_bAllowThemeTitle = false;  // not themable
+     def.m_bAllowThemeItems = false;  // already themed
+     def.m_bOneChoiceForAllPlayers = true;
++    def.m_bExportOnChange = true;  // save each change to DisabledGroups at once
+     def.m_vsChoices.clear();
+-    def.m_vsChoices.push_back("");
++    def.m_vsChoices.push_back("On");
++    def.m_vsChoices.push_back("Off");
+ 
+     m_asGroups.push_back(sGroup);
+   }
+@@ -54,14 +58,37 @@ void ScreenOptionsToggleSongs::ProcessMenuStart(const InputEventPlus& input) {
+     return;
+   }
+ 
++  // A pack that is not loaded (skipped via DisabledGroups, or not yet
++  // loaded) has no songs to list.
++  if (!SONGMAN->DoesSongGroupExist(m_asGroups[iRow])) {
++    SCREENMAN->PlayInvalidSound();
++    return;
++  }
++
+   ToggleSongs::m_sGroup = m_asGroups[iRow];
+   SCREENMAN->SetNewScreen("ScreenOptionsToggleSongsSubPage");
+ }
+ 
+ void ScreenOptionsToggleSongs::ImportOptions(
+-    int row, const std::vector<PlayerNumber>& vpns) {}
++    int iRow, const std::vector<PlayerNumber>& vpns) {
++  if (iRow >= (int)m_asGroups.size()) {  // exit row
++    return;
++  }
++  bool bEnable = SONGMAN->IsGroupEnabled(m_asGroups[iRow]);
++  m_pRows[iRow]->SetOneSharedSelection(bEnable ? 0 : 1);
++}
++
+ void ScreenOptionsToggleSongs::ExportOptions(
+-    int row, const std::vector<PlayerNumber>& vpns) {}
++    int iRow, const std::vector<PlayerNumber>& vpns) {
++  if (iRow >= (int)m_asGroups.size()) {  // exit row
++    return;
++  }
++  bool bEnable = (m_pRows[iRow]->GetOneSharedSelection() == 0);
++  // Only write when changed; the screen exports every row when it closes.
++  if (bEnable != SONGMAN->IsGroupEnabled(m_asGroups[iRow])) {
++    SONGMAN->SetGroupEnabled(m_asGroups[iRow], bEnable);
++  }
++}
+ 
+ // subpage (has the songs in a specific group)
+ REGISTER_SCREEN_CLASS(ScreenOptionsToggleSongsSubPage);
+diff --git a/src/SongManager.cpp b/src/SongManager.cpp
+index 4606f97e80..3c2e9ad0aa 100644
+--- a/src/SongManager.cpp
++++ b/src/SongManager.cpp
+@@ -892,6 +892,25 @@ void SongManager::GetSongGroupNames(std::vector<std::string>& AddTo) const {
+   AddTo.insert(AddTo.end(), m_sSongGroupNames.begin(), m_sSongGroupNames.end());
+ }
+ 
++void SongManager::GetAllPackFolderNames(std::vector<std::string>& AddTo) const {
++  std::string sDir = SpecialFiles::SONGS_DIR;
++  if (Right(sDir, 1) != "/") {
++    sDir += "/";
++  }
++  std::vector<std::string> vsDirs;
++  GetDirListing(sDir + "*", vsDirs, true);
++  StripCvsAndSvn(vsDirs);
++  StripMacResourceForks(vsDirs);
++  // Also include loaded groups (e.g. from other song directories).
++  for (const std::string& s : m_sSongGroupNames) {
++    if (std::find(vsDirs.begin(), vsDirs.end(), s) == vsDirs.end()) {
++      vsDirs.push_back(s);
++    }
++  }
++  SortRStringArray(vsDirs);
++  AddTo.insert(AddTo.end(), vsDirs.begin(), vsDirs.end());
++}
++
+ bool SongManager::DoesSongGroupExist(std::string sSongGroup) const {
+   return find(m_sSongGroupNames.begin(), m_sSongGroupNames.end(), sSongGroup) !=
+          m_sSongGroupNames.end();
+diff --git a/src/SongManager.h b/src/SongManager.h
+index 395d1731c1..a6926efe98 100644
+--- a/src/SongManager.h
++++ b/src/SongManager.h
+@@ -116,6 +116,10 @@ class SongManager {
+   std::string GetSeriesBannerPath(std::string sSeriesName) const;
+   // std::string GetSongGroupBackgroundPath( std::string sSongGroup ) const;
+   void GetSongGroupNames(std::vector<std::string>& AddTo) const;
++  // Pack folder names found in the Songs directory on disk, plus any loaded
++  // group names, sorted and without duplicates. Unlike GetSongGroupNames this
++  // includes packs skipped via DisabledGroups (used by the toggle screen).
++  void GetAllPackFolderNames(std::vector<std::string>& AddTo) const;
+   bool DoesSongGroupExist(std::string sSongGroup) const;
+   bool HasPackIni(const std::string& sSongGroup) const;
+   RageColor GetSongGroupColor(const std::string& sSongGroupName) const;

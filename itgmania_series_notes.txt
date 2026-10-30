@@ -1,0 +1,405 @@
+ITGMANIA "SERIES" FEATURE - WORKING NOTES (v1.3.0)
+==================================================
+REVISION: 2026-10-04-a | file: itgmania_series_notes.txt | bytes: 21759
+Rev -a: correction blocks in sections 3, 12c, 12g, 12h merged to current state (history: engine notes section 8); no new findings.
+ 
+Basis:    Source code of itgmania/itgmania at tag v1.3.0
+          (commit 8a3bf8884a), read on 2026-09-29, plus the git log.
+Also read: Simply Love theme at the commit v1.3.0 pins (dd06138), the
+          original proposal (issue #266), release notes, and PR #1488.
+Not done: I did not run the game, and I did not read the full discussion
+          threads of the PRs that added Series (only search excerpts).
+ 
+Confidence tags used below:
+  [CODE]      read directly in the source; file/function given
+  [INFERRED]  my reading of how the code would behave; not tested in game
+  [UNVERIFIED] something I could not determine from what I read
+ 
+ 
+1. WHAT SERIES IS
+-----------------
+A Series is a named bundle of song packs. A pack joins a Series by having
+a "Series=" line in its Pack.ini. On the song wheel (in the Series sort
+order only), the packs of a Series are shown nested under a single
+expandable parent row, instead of each pack sitting at the top level.
+ 
+History [CODE, git log]:
+  2026-04-09  5cda97c0fb  "Implement SORT_SERIES and initial ParentSection
+                           support in music wheel"
+  2026-06-22  36dc1925bd  Added the "SeriesBanner" Pack.ini key
+  2026-06-29  0c85f6c2c3  Docs marked "since 1.3.0"; sort list reordering
+  (All by the author git records as "Crash Cringle"; the release notes
+  credit @CrashCringle12.)
+ 
+The v1.0.0 release notes introduced the "Series=" key but called it unused.
+v1.3.0 is the first release where it does anything. The v1.0.0 template
+does not list SeriesBanner; it was added later.
+ 
+ 
+2. PACK.INI KEYS THAT AFFECT SERIES
+-----------------------------------
+File: Pack.ini, in the root of the pack folder. Parsed in
+src/Group.cpp (Group::Group).
+ 
+Minimal example:
+ 
+    [Group]
+    Version=1
+    DisplayTitle=Example Pack 3
+    SortTitle=Example Pack 003
+    Series=Example Series
+    SeriesBanner=series-banner.png
+ 
+Series=
+  Free-text name of the series. Leading/trailing whitespace is trimmed.
+  Empty or absent = the pack belongs to no series. [CODE: Group.cpp]
+  The name is used verbatim as the parent row's label and as the key for
+  grouping. Packs are grouped by EXACT string match. [CODE: SongManager.cpp
+  m_mapNameToSeries is a std::map keyed on the name; MusicWheel.cpp
+  compares names with !=]
+ 
+SeriesBanner=
+  Path to the banner image for the whole series, RELATIVE TO THE PACK
+  FOLDER that contains this Pack.ini. [CODE: SongManager.cpp, the
+  GetDirListing call builds sDir + sGroupDirName + "/" + SeriesBanner]
+  Because it goes through GetDirListing, it is treated as a file pattern,
+  so a wildcard such as "series-banner.*" should match. [INFERRED]
+  Unlike the pack's own Banner, there is no automatic fallback search for
+  *.png / *.jpg in the folder. If the path matches no file, the key is
+  simply ignored for that pack. [CODE]
+ 
+Version=   (REQUIRED for anything in the file to be read)
+  If the [Group] section has no non-empty Version value, the ENTIRE
+  Pack.ini is ignored (Series included) and a warning is logged. Any
+  non-empty value works: the number is stored but no code branches on it.
+  [CODE: Group.cpp; GetVersion() has no other callers and no Lua binding]
+    The v1.3.0 release notes say SeriesBanner bumped the Pack.ini version
+  to 2, and the engine's default version constant is 2. But the parser
+  reads Series and SeriesBanner from ANY file with a non-empty Version, so
+  a Version=1 file with SeriesBanner still works. [CODE]
+  Note: the parser reads the section literally named [Group].
+ 
+Other keys read by the parser (for context): DisplayTitle, SortTitle,
+TranslitTitle, Banner, SyncOffset (NULL or ITG), Year. Year is stored but
+I found nothing that uses it for sorting yet. [CODE]
+ 
+Pack.ini filename: the code looks for "Pack.ini". The v1.0.0 notes say it
+is case-sensitive; whether that matters depends on the OS filesystem.
+[UNVERIFIED on each platform]
+ 
+ 
+3. HOW THE SERIES BANNER IS CHOSEN
+----------------------------------
+[CODE: SongManager.cpp, group registration ~lines 396-414 and
+ GetSeriesBannerPath ~lines 834-857]
+ 
+  a) As each pack loads, if it has a Series, it is added to that series.
+  b) The first loaded pack whose SeriesBanner resolves to a real file
+     "wins"; later packs' SeriesBanner values are ignored for that series.
+     A pack whose SeriesBanner matches nothing does not block a later pack
+     from supplying one.
+  c) If no pack in the series supplies a working SeriesBanner, the series
+     uses the regular banner of the pack whose FOLDER NAME sorts first
+     (plain string comparison, so it is case-sensitive/byte order).
+     Note: the commit message calls this "the first pack"; in the code it
+     is the alphabetically first folder name, not necessarily load order.
+ 
+"First loaded" in (b) [CODE: SongManager.cpp LoadSongDir, AddGroup; RageUtil.cpp;
+ StdString.h. Corrected 2026-09-29 and 2026-10-03]:
+  SeriesBanner is resolved in the order AddGroup() is called. AddGroup runs in
+  the finalizing loop over mapGroupSongDirs, a std::map keyed by pack folder
+  name: BYTE-ORDER, CASE-SENSITIVE iteration ("Zeta" before "alpha").
+  SortRStringArray is case-insensitive but its result goes into the map, whose
+  ordering takes over, so it does not decide this.
+  Consequences:
+    - The pack whose folder name is smallest in byte order supplies the
+      SeriesBanner (if it resolves). The fallback in (c) also uses std::string
+      operator< (byte order).
+    - No per-directory ordering: LoadSongDir is called once; extra song folders
+      are virtual-filesystem mounts merged into the same listing (engine notes
+      7p). Which folder a pack sits in does not matter.
+    - A pack with zero loaded songs is deleted before AddGroup and cannot supply
+      a banner. Packs skipped by "onlyAdditions" reloads are not re-added.
+  Not tested in game.
+ 
+Practical advice that follows: put SeriesBanner in exactly one pack of
+the series (e.g. the first), to avoid depending on load order.
+ 
+Where the banner appears: on song select, when a series (parent) row is
+highlighted while in the Series sort, the banner comes from
+GetSeriesBannerPath(selected section). [CODE: ScreenSelectMusic.cpp
+~lines 1806-1812] Group rows use the group's own banner as before.
+ 
+ 
+4. SORTING BEHAVIOR (SORT_SERIES)
+---------------------------------
+[CODE: SongUtil.cpp SortSongPointerArrayByParentSectionName; MusicWheel.cpp]
+ 
+  - Series is its own sort order ("SortOrder_Series"; menu choice
+    "Series"). It is not applied automatically. The fallback theme lists
+    it in the SortOrders metric and has ChoiceSeries="sort,Series".
+    Other themes must include it in their own sort menu. [CODE for
+    _fallback AND for Simply Love dd06138: SL lists it and makes it the
+    default sort, see section 11. Tag corrected 2026-10-01]
+  - Songs are ordered by (series name, then pack SortTitle). Both use the
+    engine's sort-string rule: uppercased, and names starting with a
+    non-alphanumeric character are pushed to the end.
+  - There is NO separate "series sort title" key. A series sorts by its
+    Series= text. To control series order, control the text itself
+    (e.g. zero-padding or a leading digit). [CODE]
+  - Within a series, packs are ordered by each pack's SortTitle (which is
+    why SortTitle matters here: "Pack 002" before "Pack 010").
+  - Packs with NO series are sorted into the same list using their own
+    SortTitle compared against series NAMES. So a standalone pack appears
+    at the alphabetical spot where its title falls among the series names.
+  - [INFERRED] Sorting is case-insensitive but grouping on the wheel is
+    case-sensitive. Two packs with series names differing only by case
+    (e.g. "ITL Online" / "ITL online") sort near each other but are
+    different series, and could produce separate parent rows.
+    Keep series spelling identical across packs.
+ 
+ 
+5. WHEEL BEHAVIOR
+-----------------
+[CODE: MusicWheel.cpp, roughly lines 911-971 (building), 1385-1430
+ (counts), 1673-1700 (Select), 1782-1800 (close), 1844-1900 (visibility)]
+ 
+  - The Series sort is currently the only sort that creates "parent
+    section" rows. [CODE: comment in MusicWheel.cpp]
+  - Structure: Series row (parent)  ->  pack rows (children)  ->  songs.
+    Packs with no series remain ordinary top-level pack rows.
+  - In v1.3.0 EVERY non-empty Series gets a parent row, even if only one
+    pack uses that name. [CODE, v1.3.0]. This changes on the beta branch
+    (not in v1.3.0): see section 12.
+  - Nothing is nested until a series is opened. Collapsed, you see the
+    series row and standalone pack rows.
+  - Selecting (confirm) on a series row: opens it, revealing its pack
+    rows. Confirming it again while open with no pack expanded collapses
+    it. The wheel plays the expand/collapse sounds.
+  - Selecting a pack row inside an open series: expands that pack's songs
+    (the series stays open). Confirming it again collapses back to the
+    "series open, no pack open" state.
+  - Selecting a standalone pack row opens it and closes any open series.
+  - The "close folder" input (the CodeDetector "EnteredCloseFolder" code)
+    collapses ONE level: pack -> series, then series -> closed. The
+    cursor returns to the row that was closed.
+  - The number shown on a series row is the count of SONGS in it, not the
+    number of packs. It is recomputed after filtering (e.g. by the current
+    style/steps type), and a series or pack with zero playable songs after
+    filtering is removed from the wheel entirely. [CODE]
+  - Series row label: passes through ShortenSeriesName (see section 7).
+  - Parent rows use theme elements named ParentCollapsed / ParentExpanded
+    (metrics ParentCollapsedX/Y/OnCommand, ParentExpandedX/Y/OnCommand;
+    graphics "MusicWheelItem ParentCollapsed/ParentExpanded ...").
+    The fallback theme provides them.
+  - Section colors for series rows cycle through the wheel's section
+    color list. [CODE]
+ 
+ 
+6. THEME METRICS THAT INTERACT WITH SERIES  ([MusicWheel] group)
+-----------------------------------------------------------------
+OnlyShowActiveParentSection (default false)
+  When a series is open but no pack inside it is expanded, hides the
+  other series/parent rows, leaving just the open series and its packs.
+  If HideActiveSectionTitle is also true, the open series' own row is
+  hidden too in that state. [CODE, MusicWheel.cpp ~1851-1875]
+ 
+OnlyShowActiveSection (default false)
+  Existing metric. With Series it now also applies to parent rows: once a
+  pack is expanded, all other section/parent headings are hidden except
+  the open series row (the open pack's own heading is hidden if
+  HideActiveSectionTitle is true, which is the default). [CODE]
+ 
+HideActiveSectionTitle (default true)
+  See the two entries above.
+ 
+ 
+7. SHORTENING SERIES NAMES
+--------------------------
+Data/Translations.xml has a <Series> block (same format as <Groups>).
+Each <Translation TitleFrom="regex" TitleTo="replacement"/> rewrites the
+displayed series label. The shipped default rewrites "In The Groove..."
+or "In the Groove..." to "ITG...". [CODE + Data/Translations.xml]
+This affects the label only, not the Series= value used for grouping.
+ 
+ 
+8. LUA API  (theme authors)
+---------------------------
+Documented in Docs/Luadoc/LuaDocumentation.xml:
+  Group:GetSeries()                      -> string ("" if none) [since 1.0.0]
+  SONGMAN:GetSeriesBannerPath(sSeries)   -> string
+  SONGMAN:ShortenSeriesName(sSeries)     -> string
+Enum value: SortOrder_Series.
+ 
+Present in code but NOT bound to Lua on Group objects:
+  the raw SeriesBanner value (no Group:GetSeriesBanner...). Use
+  SONGMAN:GetSeriesBannerPath() instead. [CODE: LunaGroup method list]
+SongManager has a C++ accessor GetSeriesGroupMap() but I did not find a
+Lua binding for it. [CODE]
+ 
+ 
+9. GAPS IN THE OFFICIAL DOCS (as of v1.3.0)
+-------------------------------------------
+Not described anywhere I looked (Docs/, release notes):
+  - The SeriesBanner key and its resolution/fallback rules
+  - The Series sort order and how it nests packs
+  - Open/close/collapse behavior of parent rows
+  - The OnlyShowActiveParentSection metric
+  - The <Series> block in Translations.xml
+  - That Version is required for Pack.ini to be read at all
+  - That Series names must match exactly
+ 
+Also worth noting: the release-note template for Pack.ini (v1.0.0) is out
+of date; it omits SeriesBanner.
+ 
+ 
+10. THINGS I WOULD CHECK IN-GAME BEFORE PUBLISHING
+--------------------------------------------------
+  1. Two packs with the same Series but different capitalization: one
+     parent row or two?
+  2. SeriesBanner defined in two different packs (try folder names 'Zeta'
+     and 'alpha'): per the code, 'Zeta' should win (byte order).
+  3. SeriesBanner wildcard (e.g. "*.png") actually matching.
+  4. A standalone pack titled between two series names: where it lands.
+  5. Whether your theme's sort menu actually offers the Series sort.
+  6. What the parent-row count displays with a style that filters out
+     some songs (e.g. singles vs doubles).
+  7. Pack.ini with no Version line: confirm Series is ignored.
+  8. A Series name used by only one pack: confirm it shows a lone parent
+     row in v1.3.0 (and no parent row on a beta build, see section 12).
+ 
+ 
+11. SIMPLY LOVE (THEME) INTEGRATION
+-----------------------------------
+Checked against Simply Love commit dd06138, the commit v1.3.0 pins.
+Other versions of the theme may differ.
+ 
+  - Sort menu: "Series" is the first entry. [Simply Love:
+    SortMenu/default.lua]
+  - Default sort: Simply Love has a "DefaultSort" theme option whose
+    default value is "Series" (choices: Series, Group, Title, Meter,
+    Popularity, Recent). So with this theme, Series is the wheel's
+    default view, not something the player has to opt into.
+    [Scripts/99 SL-ThemePrefs.lua; metrics.ini DefaultSort]
+  - "Hide Inactive Series" option (default No). It is wired directly to
+    the engine metric: OnlyShowActiveParentSection=
+    ThemePrefs.Get("HideInactiveSeries"). [metrics.ini]
+  - The IIDX wheel style sets OnlyShowActiveSection. [metrics.ini]
+  - Simply Love sets HideActiveSectionTitle=false, overriding the engine
+    default of true. So the open series row stays visible when
+    HideInactiveSeries is on. [metrics.ini]
+  - Parent rows are drawn with a folder icon; child pack rows are
+    indented. The engine passes the theme the params IsParentSection and
+    ParentSection for wheel items. [Graphics/MusicWheelItem
+    SectionCollapsed/Expanded NormalPart.lua; MusicWheelItem.cpp]
+  - Series has translated option strings (en, de, es, pl, ru, it, ...).
+ 
+Context: the original proposal for Pack.ini (issue #266, 2024) described
+Series as "the name of the pack series", motivated by numbered series
+like Mute Sims, Sudziosis, and Valex.
+ 
+ 
+12. POST-v1.3.0 CHANGES ON THE BETA BRANCH (checked 2026-09-29)
+---------------------------------------------------------------
+Branches [CODE, git ls-remote]: the default branch "release" points at
+v1.3.0 (8a3bf8884a). Active development is on "beta" (head 28e58a78c7,
+committed 2026-09-26). Everything below is beta-only and NOT in v1.3.0.
+Read from source; not run.
+ 
+  a) Single-pack series get no parent row.
+     Commit 05507f6b40 (2026-07-31, Crash Cringle) "Only display series
+     that have more than 1 group". [CODE: MusicWheel.cpp
+     BuildWheelItemDatas; new SongManager::GetGroupsInSeries()]
+     If SONGMAN->GetGroupsInSeries(series).size() <= 1, the wheel treats
+     the pack as having no series (the series name becomes "" for that
+     pack), so it shows as an ordinary top-level pack row.
+     The count is of groups registered in the series, i.e. all loaded
+     packs naming it, not only packs with songs visible under the
+     current filter. [INFERRED from code]
+  b) SORT POSITION IS UNCHANGED for such a pack. [CODE: SongUtil.cpp
+     SortSongPointerArrayByParentSectionName on beta] The sort key still
+     uses pGroup->GetSeries() (series name, then pack SortTitle). So a
+     lone-pack series appears as a plain pack row, but at the position
+     of its Series= text in the alphabetical order, not of its
+     DisplayTitle/SortTitle alone. [INFERRED consequence]
+  c) PR #1488 "Display series header for multi-item series only" (sukibaby),
+     head aac705faf8 (2026-09-08), based on beta 479423989e. Same goal as (a),
+     done differently: it counts distinct packs from the sorted song list before
+     creating the parent row. NOT in beta (head is not an ancestor; `git diff
+     beta pr1488 -- src/MusicWheel.cpp` still shows its changes) [CODE]. CLOSED,
+     unmerged: on 2026-09-09 teejusb commented it was "already fixed" by PR
+     #1447; the author closed it, unable to reproduce on a rebuilt branch [WEB,
+     page fetched]. Whether #1447 is the same change as beta 05507f6b40 (a) is
+     [UNVERIFIED], likely yes. Practical difference between (a) and the PR:
+     [UNVERIFIED, likely small].
+  d) Commit 200c304220 (2026-08-16, navaroli) "Persist SortBy_Series
+     option": one line in GameConstantsAndTypes.h. IsSongSort() now also
+     returns true for SORT_SERIES. [CODE] Callers: MusicWheel::ChangeSort
+     (MusicWheel.cpp ~1610) only records a new sort as the "preferred"
+     sort if IsSongSort(); GameState.cpp ~926 only writes the sort into
+     the profile (pProfile->m_SortOrder) if IsSongSort(). So in v1.3.0
+     choosing Series was NOT remembered as the preferred sort or saved to
+     the profile; on beta it is, like Title/Artist/etc. [INFERRED from
+     those two call sites; not run] Beta also reordered the SortOrder
+     enum (commits dbe09dffb6, b1a53c70e8, df4aaa8aeb); I did not check
+     what that changes for saved data or Lua. [UNVERIFIED -> RESOLVED
+     2026-10-03, see 12h]
+  e) "Close folder" input on beta: ScreenSelectMusic::DetectCodes now
+     checks EnteredCloseFolder BEFORE the prev/next-steps codes. The new
+     fallback close-folder gesture for dance/pump is "@MenuDown-MenuUp"
+     (hold MenuDown, press MenuUp), added by ed19477cc6 and swapped in
+     direction by edd3860083 [CODE: _fallback Scripts/03 Gameplay.lua].
+     (Corrected 2026-09-30: an earlier version said "MenuUp+MenuDown".)
+     Details in itgmania_input_notes.txt. Not in v1.3.0; the section 5
+     description of close-folder applies to v1.3.0.
+  f) Unchanged on beta [CODE, checked 2026-09-29]: beta pins the same
+     Simply Love commit (dd06138), so section 11 still applies. Group.cpp
+     (Pack.ini keys) is byte-identical to v1.3.0. SongManager.cpp differs
+     only by the added GetGroupsInSeries() (so SeriesBanner resolution and
+     the fallback are unchanged). Data/Translations.xml is unchanged, and
+     the _fallback metrics.ini diff contains no series/parent lines.
+ 
+  Suggested in-game check on a beta build: a Series used by one pack
+  (no parent row?) and where that pack lands in the list.
+ 
+  g) Beta head history [CODE, git log]: 28e58a78c7 -> c8e69b9ca8 (2026-10-01,
+     5 commits) -> e4b4bf0755 (author 2026-09-18, committer 2026-10-03; one
+     commit, the video decoding refactor, touching only src/arch/MovieTexture/).
+     Subjects: engine notes 7t, 7u. None touches the Series files.
+ 
+  h) RE-DIFF AGAINST BETA e4b4bf0755 (2026-10-03) [CODE unless tagged]
+     `git diff c8e69b9ca8 beta` on Group.cpp/.h, SongManager.cpp/.h,
+     MusicWheel.cpp/.h, SongUtil.cpp, GameConstantsAndTypes.h,
+     ScreenSelectMusic.cpp, _fallback metrics.ini, Data/Translations.xml: 0
+     lines each.
+     v1.3.0 vs beta e4b4bf0755, per file:
+       identical: Group.cpp, Group.h, SongUtil.cpp/.h, MusicWheel.h,
+                  MusicWheelItem.cpp, WheelBase.cpp, Data/Translations.xml
+       SongManager.cpp +11 / .h +2: only GetGroupsInSeries(); banner
+                  resolution unchanged.
+       MusicWheel.cpp +8 -2: only the single-pack rule (12a).
+       ScreenSelectMusic.cpp: only the DetectCodes reorder (12e).
+       GameState.cpp: only an unrelated memory-card mount warning.
+       _fallback metrics.ini: no series/parent/OnlyShow/HideActive lines.
+     Simply Love pin on beta is still dd06138 (git ls-tree): sections 11 and
+     12f hold.
+     SORTORDER REORDER AND IsSongSort (resolves 12d's open point):
+       - Commits dbe09dffb6, b1a53c70e8, df4aaa8aeb moved SORT_SERIES to
+         position 1 (after PREFERRED) and Recent/RecentP1/RecentP2/Length into
+         the song-sort block; SortOrderNames[] was reordered to match.
+       - Profiles save the sort as a STRING (Profile.cpp ~1598 SortOrderToString,
+         ~1811 StringToSortOrder): saved data is safe. Lua enum docs match the
+         C++ array (33/33, scripted). A theme using SortOrder:Reverse() numeric
+         indices would see shifted numbers [INFERRED; none in _fallback or SL
+         dd06138, which use names].
+       - IsSongSort on beta is a range test: so >= SORT_PREFERRED && so <=
+         SORT_DOUBLE_CHALLENGE_METER (v1.3.0: that range OR SORT_LENGTH). The
+         range now contains Series, Recent, RecentP1/P2 and Length.
+         CORRECTION to 12d: not only Series. In v1.3.0 Recent* sat after
+         SORT_ROULETTE, outside the range, so Recent sorts were not remembered;
+         on beta they are [INFERRED from the two call sites, MusicWheel.cpp
+         ~1616 and GameState.cpp ~929; not run]. Roulette, ModeMenu and the
+         course sorts stay outside.
+       - Grep of src/ for other SORT_ range comparisons: none besides
+         IsSongSort (pattern-based, not exhaustive).
+     Not run. Still unchecked: any third-party theme's numeric use.

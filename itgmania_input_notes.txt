@@ -1,0 +1,124 @@
+ITGMANIA INPUT CODES: "|" ALTERNATES AND THE CLOSE-FOLDER FALLBACK - WORKING NOTES (beta, NOT in v1.3.0)
+=========================================================================================================
+ 
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, complete for its topic (no open to-dos).
+  REVISION:      2026-10-11-a (header added; body unchanged from 2026-09-30)
+  VERSION BASIS: itgmania beta head 28e58a78c7; NOT in v1.3.0.
+  TOPIC KEY:     input, InputQueue, "|" alternates, CloseCurrentFolder,
+                 @MenuDown-MenuUp, CodeDetector, code strings
+  READ WHEN:     the task touches code-string syntax, theme [CodeDetector]
+                 metrics, or the close-folder gesture on beta.
+  SEE ALSO:      series notes 5 and 12e (close-folder), engine notes 5b.
+ 
+Basis:    Source of itgmania/itgmania branch "beta", head 28e58a78c7
+          (author date 2026-09-26, committer date 2026-09-28), read
+          2026-09-30, plus git log. Simply Love at dd06138 (the commit beta
+          pins). Not run; not built. PR threads not read.
+Docs:     grep of Docs/ finds no description of the code syntax at all
+          (only two old changelog lines). Not documented for either "|" or
+          the older "-", "@", "+", "~", "!" prefixes.
+Tags:     [CODE] read in source; [INFERRED] reasoned, not tested;
+          [UNVERIFIED] not determined.
+ 
+CORRECTIONS TO EARLIER NOTES (2026-09-30)
+  - Series notes 12e / engine notes 5b said the fallback close-folder
+    binding is "MenuUp+MenuDown". WRONG. The final beta value is
+    "@MenuDown-MenuUp" (hold MenuDown, then press MenuUp); "+" was only
+    in the first commit's message, and the code was "@MenuUp-MenuDown"
+    until commit edd3860083 (2026-09-10) swapped it. [CODE]
+  - Beta head 28e58a78c7 date: author 2026-09-26, committer 2026-09-28.
+ 
+1. Commits [CODE, git log]
+   a657f14ed7 2026-07-01 Arthur Eubanks  "Allow using | to separate
+              alternate input codes" (src/InputQueue.cpp/.h only)
+   ed19477cc6 2026-07-01 Arthur Eubanks  "Allow @MenuUp+MenuDown to close
+              current folder" (Lua fallback + ScreenSelectMusic.cpp)
+   edd3860083 2026-09-10 Arthur Eubanks  "address comments": direction of
+              the fallback swapped; comment added in DetectCodes.
+ 
+2. Code string syntax (as parsed on beta) [CODE: InputQueue.cpp
+   InputQueueCode::Load / ParseCodeString]
+   - "|" separates ALTERNATIVE patterns. Any one matching fires the code.
+   - "," separates successive presses in a sequence ("Up,Up").
+   - "-" joins buttons pressed together in one step (all must be pressed
+     within 0.05 s of each other: g_fSimultaneousThreshold).
+   - Prefixes on a button name: "@" must be held when the press happens;
+     "!" must NOT be held; "+" also accepts key-repeat events; "~" fires
+     on release instead of first press. Prefixes can stack.
+   - Time window per pattern: 0.55 s for a 1-step pattern, else
+     (steps-1) x 0.6 s. (Same numbers as v1.3.0; now computed per
+     alternative instead of stored on the object.)
+   - Example from the fallback theme: "Up-Down|@MenuDown-MenuUp" =
+     Up+Down together, OR press MenuUp while holding MenuDown.
+   Whether "!" / "~" behave as described was read, not tested.
+ 
+3. What "|" changes [CODE: diff of a657f14ed7]
+   - Load() splits on "|" (empty pieces ignored) and parses each piece
+     separately into m_aPatterns.
+   - EnteredCode() tries each pattern; on the first match it clears the
+     controller's input queue and returns true. (v1.3.0 cleared the
+     queue inside the single-pattern matcher; same net effect.)
+   - Parse failures are per-alternative: an alternative with an unknown
+     button name is DROPPED (Trace log only) and the others still load.
+     Load() returns false only if NO alternative parsed. In v1.3.0 any
+     bad button made the whole code fail. [CODE]
+     Consequence [INFERRED]: a typo in one alternative fails quietly.
+   - A string without "|" behaves as before, apart from the above.
+   - Applies everywhere InputQueueCode is used: CodeDetector metrics
+     ([CodeDetector], [CourseCodeDetector] etc.), and InputQueueCodeSet
+     (CodeSet.cpp), which loads [<Screen>] CodeNames/Code<Name> metrics
+     and OptionsList codes. [CODE: CodeSet.cpp, Screen.h, OptionsList.h]
+   - Motivation per commit message: avoid needing NextSort1/2/3/4-style
+     duplicate code slots. The existing numbered slots are unchanged.
+ 
+4. Close-folder fallback [CODE: Themes/_fallback/Scripts/03 Gameplay.lua
+   ~344-348, beta]
+     CloseCurrentFolder default = "MenuUp-MenuDown"            (unchanged)
+     dance = "Up-Down|@MenuDown-MenuUp"     (was "Up-Down" in v1.3.0)
+     pump  = "@UpLeft-@UpRight-Center|@MenuDown-MenuUp"
+   So on beta, dance and pump gain "hold MenuDown, press MenuUp" as a
+   second way to close the current folder/series level. The default
+   (other games) still uses simultaneous MenuUp+MenuDown.
+   Effect on the wheel: CloseOpenSectionOneLevel(), one level at a time
+   (see series notes section 5). [CODE]
+ 
+   Order change in ScreenSelectMusic::DetectCodes: EnteredCloseFolder is
+   now tested before PrevSteps/NextSteps. The code comment says the
+   fallback command is a prefix of the prev/next steps command.
+   Checked why [CODE for SL metrics; INFERRED for the reason]: Simply
+   Love's [CodeDetector] sets PrevSteps2="MenuUp" and NextSteps2=
+   "MenuDown" (single presses). The fallback's final press, MenuUp, also
+   satisfies PrevSteps2, so without the reorder a close-folder gesture
+   could also change steps (whichever is tested first wins, and the
+   winner clears the queue). The fallback theme's own PrevSteps2 is
+   "MenuUp,MenuUp", which is a weaker overlap.
+   Simply Love uses GetCodeForGame("CloseCurrentFolder"), so it inherits
+   the new fallback value. [CODE: Simply Love metrics.ini ~1735]
+   Not in v1.3.0.
+ 
+5. Collision check (done) [CODE]
+   The fallback's default NextOptionsList is "@MenuDown-MenuUp" and
+   PrevOptionsList "@MenuUp-MenuDown", i.e. the same gestures as the new
+   close-folder fallback. But CODE_PREV/NEXT_OPTIONS_LIST have no
+   consumers in src/ (names appear only in CodeDetector.cpp), and
+   [ScreenSelectMusic] UseOptionsList=false in _fallback; Simply Love does
+   not enable it. OptionsList navigation goes through its own InputQueueCodeSet
+   / button mapping (GetOptionsListMapping). So no clash found in the
+   shipped themes. A theme that enabled UseOptionsList AND reused those
+   gestures could clash: [UNVERIFIED, OptionsList input path not read].
+ 
+6. In-game checks (I cannot run the game)
+   1. Beta, dance/pump, Simply Love: hold MenuDown, tap MenuUp on an open
+      pack: closes one level, and the difficulty does NOT change.
+   2. Same with the old Up+Down (pad) chord: still works.
+   3. Tap MenuUp alone: still changes steps.
+   4. Other games (default): MenuUp+MenuDown together still closes.
+   5. Put a bad button name in one "|" alternative in a theme metric:
+      the other alternative should still work; check Log.txt for the
+      "unrecognized button" trace.
+   6. Confirm "|" in a screen [Codes] entry (CodeNames/Code<Name>).
+ 
+7. Open points
+   - Whether upstream docs/PR discussion describe "|" [UNVERIFIED].
+   - Behaviour of "~"/"!" not exercised.

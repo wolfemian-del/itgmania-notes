@@ -1,0 +1,235 @@
+ITGMANIA / SIMPLY LOVE: SORTING THE MUSIC WHEEL BY THE MODELED DIFFICULTY RATING
+================================================================================
+REVISION: 2026-10-24-a | file: notes/itgmania_modeled_sort_findings.txt
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        NEW 2026-10-24. READ-ONLY source findings and design evaluation. No code written, nothing
+                 built, nothing run in the game (I cannot run it). In-game checks: section 8.
+  VERSION BASIS: engine v1.3.0 (8a3bf8884a); engine beta eac008e0ac (enum, IsSongSort and Meter-sort call
+                 sites compared only, section 7); Simply Love dd06138.
+  TOPIC KEY:     SORT_METER, UpdateMeterSort, GetMeterToSongsMap, SortOrder enum, SortOrderNames, IsSongSort,
+                 StringToSortOrder, sLastOpenSection, SortMenu AddSorts, DifficultyModel port to C++
+  READ WHEN:     the task is to add a sort/section by modeled difficulty to the wheel, or to port the model
+                 to C++, or to add any new SortOrder.
+  SEE ALSO:      notes/itgmania_display_meter_findings.txt (display side; its section 2 says the wheel Meter
+                 sort stays official); claude/itgmania_difficulty_rating_writeup.txt; claude/DifficultyModel.lua;
+                 notes/itgmania_beta_findings.txt 7r (SORT_SERIES / IsSongSort on beta);
+                 notes/itgmania_toggle_findings.txt 7w (wheel timing).
+Tags: [CODE] read in source (file/function given), [INFERRED] reasoned, not run, [UNVERIFIED] not determined.
+
+1. ANSWER
+  Feasible. The cleanest route is a NEW engine sort order (working name SORT_MODELED_METER, string
+  "ModeledMeter") that reuses the Meter sort's structure with the section key replaced by the modeled rating,
+  which needs the model ported to C++ (16 coefficients, one intercept, a 47-knot table). The wheel build
+  itself is a small change; the real costs are (a) the model in C++ with exact parity to the Lua, (b) three
+  places that assume a section name IS an official meter, (c) deciding how the sort relates to the
+  DifficultyDisplay pref, which lives only in Lua, (d) per-branch patches because the enum order differs
+  between v1.3.0 and beta. A Lua-only route does not exist in the engine as it stands (section 6).
+
+2. HOW THE EXISTING METER SORT WORKS (check 1) [CODE]
+  - MusicWheel::BuildWheelItemDatas (MusicWheel.cpp:568) handles SORT_METER in one big case. For SORT_METER the
+    song array is NOT sorted by the generic code: it calls SONGMAN->UpdateMeterSort(arraySongs) (line 629).
+  - SongManager::UpdateMeterSort (SongManager.cpp:1957): clears the member map m_mapSongsByDifficulty
+    (std::map<int, vector<Song*>>), then for every song takes SongUtil::GetPlayableSteps and, for EVERY
+    playable chart, pushes the song into map[pSteps->GetMeter()] unless that song is already in that
+    meter's vector (std::find on the vector). So: one wheel entry per song per DISTINCT official meter,
+    not one per chart; two charts of one song with the same meter give one entry; a song with charts at 9,
+    11 and 14 appears under three sections.
+  - "Playable" (SongUtil::GetPlayableSteps/GetPlayableStepsTypes, SongUtil.cpp:1297-1365) = all StepsTypes of
+    the current style, or of ALL compatible styles when CommonMetrics::AUTO_SET_STYLE is set or no style is
+    chosen yet, filtered by STEPS_TYPES_TO_SHOW and by stages left; locked steps removed. So on a screen
+    that has not fixed a style, Meter-sort sections can mix singles and doubles charts [INFERRED from the
+    code path; depends on theme metrics, not checked in SL].
+  - Section order is the std::map key order, ascending integer. The wheel then adds a Section item
+    (ssprintf("%d", meter), MusicWheel.cpp:853-856) followed by the songs (lines 858-862).
+    The section text IS the meter number as a string.
+  - Order of songs inside a section = order of arraySongs from GetSongList (MusicWheel.cpp:458, default
+    branch SONGMAN->GetAllSongs(), then filtering). UpdateMeterSort does no sorting. The comment at
+    MusicWheel.cpp:151-154 says SONGMAN->SortSongs() sorts by title so later stable sorts keep title as the
+    secondary key, so songs in a section are probably in title order [INFERRED: GetAllSongs() order
+    not read].
+  - GetMeterToSongsMap() returns the map BY VALUE (SongManager.h:156): the build copies the whole map once
+    per rebuild. UpdateMeterSort also returns a copy (unused at line 629). m_mapSongsByDifficulty is also
+    used by GetSongsByMeter (SongManager.cpp:1190); no caller of GetSongsByMeter was found in src/ [CODE:
+    grep]; Lua binding not checked.
+  - Per-item cost is dominated by the vector std::find (linear in section size): the notes measure
+    Meter build + filter at about 83 ms for 5,406 songs / ~20,730 items (toggle:7w). That is a one-time
+    cost per wheel rebuild: readyWheelItemsData (MusicWheel.cpp:1249) caches built data per SortOrder
+    (m_WheelItemDatasStatus[so] = VALID) until ReloadSongList or a profile/style change invalidates it
+    (lines 159, 290, 2097). Not rebuilt each time the sort is selected [CODE].
+    "~20,730 items = about one per chart" is [INFERRED]; confirm with the wheel-timing log.
+  - Related code that treats the section name as an official meter:
+      MusicWheel::SelectSong (MusicWheel.cpp:356-367) re-opens GAMESTATE->sLastOpenSection for
+        SORT_PREFERRED and SORT_METER only.
+      ScreenSelectMusic.cpp:1915-1921: when on SORT_METER and a song is selected, loops over the song's
+        playable steps from the last to the first and calls SwitchToDifficulty for the first whose
+        GetMeter() == StringToInt(sLastOpenSection). This is what makes the Meter sort land on the chart
+        you are browsing. With modeled sections this would compare the OFFICIAL meter to a MODELED
+        section number and would pick the wrong chart or none [INFERRED, follows from the code].
+      MusicWheel::ChangeSort (line 1575) resets sLastOpenSection to "" on every sort change.
+  - The per-slot sorts (SORT_BEGINNER_METER ... DOUBLE_CHALLENGE_METER) are different: they sort songs by one
+    difficulty slot with SortSongPointerArrayByStepsTypeAndMeter and label sections from
+    GetSectionNameFromSongAndSort (SongUtil.cpp:890-908, "%02d" of the slot's GetMeter()). Not used by SL's
+    menu (section 5).
+
+3. DATA ACCESS AND SAFETY OF A C++ RATING (check 2) [CODE]
+  - Inputs the model needs, all const accessors on Steps (Steps.h): GetRadarValues(pn) (line 119),
+    GetNpsPerMeasure(pn) (229), GetNotesPerMeasure(pn) (233), GetPeakNps(pn) (235). All read Real()->...
+    so autogenerated steps read their parent's data (private helper Real(), Steps.h).
+  - Fallbacks: GetNpsPerMeasure/GetNotesPerMeasure return a static EMPTY_VECTOR when no data (Steps.cpp:
+    932-958); GetPeakNps returns 0 (990-1000). pn is clamped to PLAYER_1 when only one copy exists. So a
+    chart with no cached data gives empty/zero inputs, NOT an error; the rating function must return
+    "unrated" for that case itself (as the Lua does by returning nil).
+  - These values are stored on the Steps object and loaded from the song cache (#RADARVALUES, #NPSPERMEASURE,
+    #NOTESPERMEASURE, #PEAKNPS: NotesLoaderSSC.cpp:699-702; written in NotesWriterSSC.cpp:441-528) or
+    computed by CalculateStepStats when a chart is parsed without cache (Steps.cpp:~451-457).
+  - Steps::Compress() (Steps.cpp:519-563) only frees the note data (m_pNoteData, m_sNoteDataCompressed,
+    m_bNoteDataIsFilled) and annotation caches. It does NOT touch m_RadarValues, m_NpsPerMeasure,
+    m_NotesPerMeasure or m_PeakNps. So reading the inputs needs no Decompress and is safe at any time,
+    including during wheel build. [CODE]
+  - Consequence: no new cache tag is needed (the model uses fields already cached), so FILE_CACHE_VERSION
+    (Song.cpp:69, 232) does NOT need a bump. [INFERRED: true only while the model's inputs stay within
+    those four fields; a refit using tech counts (GetTechCounts) would also read cached data but would
+    need its inputs re-checked.]
+  - Memoization: not needed. The rating is a pure function of cached fields; computing it inside
+    UpdateMeterSort once per playable chart is a loop over ~20k charts with a few hundred floats each
+    [INFERRED cost: milliseconds in C++; measure with the wheel-timing log]. A mutable member on Steps would
+    add invalidation risk (Reload Songs, edits) for no gain. If memoization is wanted later, the safe key
+    is the Steps pointer inside one build (a local unordered_map), not a member.
+  - The Lua model returns nil for Edit charts, courses, non-dance-single types and missing data
+    (writeup). The C++ port must reproduce each of those cases or the Lua display and the engine sort will
+    disagree about which charts are "unrated".
+  - Parity risk (main correctness risk of the whole feature): the Lua rounds half-up; the Python fit used
+    banker's rounding; C++ std::round is half-away-from-zero (same as half-up for positive values, which
+    the clamped 1-19 range guarantees only AFTER calibration [INFERRED: calibrated value could be < 0
+    only if the model breaks]). Float vs double and summation order can move a value across a .5
+    boundary. Needs a parity test over the real library (section 8, step P1) before the sort is trusted.
+
+4. ENUM, PERSISTENCE AND UNKNOWN-NAME BEHAVIOR (check 3) [CODE]
+  - v1.3.0 enum order (GameConstantsAndTypes.h:141-188): PREFERRED, GROUP, TITLE, BPM, POPULARITY(+P1,P2),
+    TOP_GRADES(+P1,P2), ARTIST, GENRE, METER, BEGINNER..CHALLENGE_METER, DOUBLE_EASY..DOUBLE_CHALLENGE_METER,
+    MODE_MENU, ALL/NONSTOP/ONI/ENDLESS_COURSES, LENGTH, ROULETTE, RECENT(+P1,P2), SERIES, NUM_SortOrder.
+    SortOrderNames[] (GameConstantsAndTypes.cpp:148-165) is a parallel string array in the same order;
+    XToString/StringToX index it with no name-based check, so the enum and the array MUST be edited in
+    lockstep. A mismatch silently mislabels every later sort.
+  - Beta (eac008e0ac) order differs: PREFERRED, SERIES, GROUP, TITLE, BPM, POPULARITY..., RECENT(+P1,P2),
+    ARTIST, GENRE, LENGTH, METER, ..., DOUBLE_CHALLENGE_METER, MODE_MENU, courses, ROULETTE, NUM. So one
+    patch cannot serve both branches for the enum and name array; the wheel/SongUtil hunks may share.
+  - Persistence: GameState.cpp:926 writes the profile's SortOrder only if IsSongSort(m_PreferredSortOrder);
+    MusicWheel::ChangeSort (line 1610) sets m_PreferredSortOrder only if IsSongSort(new_so). The profile
+    stores the sort by NAME (Profile.cpp:1589, 1801-1802; SortOrderToString/StringToSortOrder).
+      v1.3.0 IsSongSort (GameConstantsAndTypes.h:216): (PREFERRED..DOUBLE_CHALLENGE_METER) OR LENGTH. SERIES
+        and RECENT* are outside the range, so on v1.3.0 they are NOT remembered across sessions and not
+        written to the profile [CODE]. (Series is the default sort so this is invisible in SL.)
+      beta IsSongSort: PREFERRED..DOUBLE_CHALLENGE_METER only; on beta SERIES, RECENT*, LENGTH and METER are
+        inside the range [CODE].
+    To make a new sort persist, its enum value must sit inside the range on that branch, or IsSongSort must
+    be edited. Inserting it right after SORT_DOUBLE_CHALLENGE_METER (before SORT_MODE_MENU) does that on
+    both branches. Enum VALUES are not persisted (names are), so renumbering later entries is safe for
+    existing profiles [CODE].
+  - Unknown names: StringToSortOrder is a case-insensitive linear search returning SortOrder_Invalid when
+    nothing matches (EnumHelper.h:110-114). Profile load (GameState.cpp:889-891) takes the profile's sort
+    only if it is not SortOrder_Invalid. So a profile saved with "ModeledMeter" and then opened in an older
+    build is ignored and the default sort is used: no crash, no error. [CODE] Same for the "sort,<name>"
+    GameCommand (GameCommand.cpp:388-390, CHECK_INVALID_VALUE).
+  - Per-sort arrays are sized NUM_SortOrder (MusicWheel.h:127-129), so a new enum value gets its own cached
+    wheel data automatically; the FOREACH_ENUM loops at MusicWheel.cpp:159, 166, 290, 2097 cover it.
+    PreCacheAllWheelSorts (MusicWheel.cpp:49, default false) would also build it at screen start when on.
+  - Lua exposure: LuaXType(SortOrder) (GameConstantsAndTypes.cpp:168) publishes every name from the array,
+    so the theme sees "SortOrder_ModeledMeter" with no extra binding [CODE: macro; INFERRED for the new
+    name].
+  - Switches that need a new case (v1.3.0), otherwise FAIL_M or the default path: BuildWheelItemDatas case
+    list (MusicWheel.cpp:592-619) and its inner "sort the songs" switch (627-764, default is FAIL_M "Unhandled
+    sort order"); the section-building switch (815+) for the section items; SongUtil::GetSectionNameFromSongAndSort
+    (SongUtil.cpp:~860-918, default FAIL_M) if the generic section path were used. The Meter-style custom
+    section loop (MusicWheel.cpp:843-863) would be copied or generalized.
+
+5. SIMPLY LOVE SIDE (check 4) [CODE]
+  - The sort menu's list is hard-coded in AddSorts (BGAnimations/ScreenSelectMusic overlay/SortMenu/
+    default.lua:216-250): {"SortBy","Meter"} etc. Choosing an entry broadcasts MESSAGEMAN 'Sort' with
+    order = focus.sort_by (SortMenu_InputHandler.lua:25-27); metrics.ini:1688 MusicWheelSortMessageCommand
+    calls self:ChangeSort('SortOrder_'..params.order). So a new engine sort needs in the theme: one AddSorts
+    line {"SortBy","ModeledMeter"} and one en.ini string for the label (existing labels live beside
+    "Meter=Level", Languages/en.ini:168). The menu's "current sort" highlight uses
+    ToEnumShortString(GAMESTATE:GetSortOrder()) (default.lua:583-584), which works for the new name.
+  - DefaultSort theme pref (Scripts/99 SL-ThemePrefs.lua:85-95) offers only Series, Group, Title, Meter,
+    Popularity, Recent; metrics.ini:2318 passes it to the engine DEFAULT_SORT string. Adding the new sort as
+    a default is optional (add to Choices and Values). An unknown DEFAULT_SORT gives SortOrder_Invalid in
+    GetDefaultSort (GameState.cpp:108) and the profile/other fallbacks apply [CODE for the call, INFERRED for
+    the fallback chain after it].
+  - SongSearch/InputHandler.lua:29-32 changes the sort to Group after a reload when the current sort is
+    Preferred, Popularity or Recent (these reduce the song list); the modeled sort keeps all songs, so no
+    entry is needed [INFERRED].
+  - The display patch (patches/sl_display_meter.patch) shows modeled numbers by theme pref/pack, in Lua. The
+    engine sort cannot see that pref. If the sort is a pure-model sort, then with display = Official (or a
+    pack set to official) a chart labelled 12 can sit in the modeled-14 section. That is the same kind of
+    mismatch already accepted for the official Meter sort versus the Modeled display (display:2) but now
+    reversed. Two choices (section 6, decision D2).
+
+6. OPTIONS AND CHALLENGES
+  A. New engine sort SORT_MODELED_METER, model ported to C++ (RECOMMENDED).
+     Work: C++ rating function (new file, e.g. src/ModeledRating.cpp/.h, coefficients generated from
+     claude/difficulty_model_notech.json by a variant of make_lua_rating.py so Lua and C++ share one
+     source); copy of UpdateMeterSort keyed by modeled rating (plus an "Unrated" bucket); one wheel section
+     loop; enum/name/IsSongSort edits; ScreenSelectMusic.cpp:1915 and MusicWheel.cpp:356 branches extended
+     to the new sort with the modeled rating instead of GetMeter(); SL: one menu line + one string.
+     Challenges: (1) C++/Lua parity (section 3); (2) UpdateMeterSort writes the shared member
+     m_mapSongsByDifficulty, so a second map member or a local map is needed or the two sorts overwrite
+     each other (rebuilding one would change what GetMeterToSongsMap returns for the other: see the
+     build at lines 629 and 843-847, which read the member right after writing it, so the problem is only
+     if both are built interleaved on the same frame, which the code does not do; still, use a separate
+     member) [INFERRED]; (3) Unrated bucket: the model returns nothing for Edit, non-dance-single and
+     data-less charts, so a section for them (and a rule for where it sorts: last is the natural choice) is
+     needed; (4) the quirk that a song appears once per distinct section; (5) per-branch patches.
+  B. Lua-built "Preferred" list. SONGMAN:SetPreferredSongs(path, isAbsolute) reads a playlist FILE and the
+     wheel's SORT_PREFERRED already supports sections from it (MusicWheel.cpp:816-841). A theme could
+     compute ratings in Lua, write a temporary .txt with section headers, and load it. No engine change,
+     but: it needs a writable path; it overwrites whatever Preferred list the player had loaded; the Lua
+     cost is ~20k Rating() calls on every sort pick (the model reads per-measure vectors through the Lua
+     bridge) [INFERRED: not timed]; SL's own playlist code uses the same slot (SortMenu_InputHandler.lua:
+     30-45, 171-180). Workable as a prototype, poor as a feature.
+  C. Engine hook that calls a theme Lua function for a chart key. Keeps one model implementation (Lua) and
+     the display pref visible to the sort, but costs one C++->Lua call per chart per build (~20k) and adds
+     an engine API (new metric/Lua function name) [INFERRED]. Not recommended unless the C++ port is
+     rejected.
+  D. Decisions needed from the user:
+     D1  Section granularity: one section per modeled rating 1-19 plus "Unrated" (matches Meter), or no
+         sections (single list ordered by rating then title)? Meter's code path supports sections; the
+         "no sections" path is the generic one (bUseSections false) and needs a comparator.
+     D2  Pure-model sort versus sort that follows DifficultyDisplay/Pack.ini DifficultyMode. Pure-model is
+         what the user described ("sort charts by their model-calculated difficulty"); following the
+         display pref needs the pref and the pack's Pack.ini mode in C++ (the engine already reads Pack.ini
+         in Group.cpp, so a Group field is possible; theme pref access from C++ is not available without a
+         metric or Lua call).
+     D3  Which chart's rating places a song, when it has several: one entry per distinct modeled rating
+         (like Meter), or one entry at its highest rating, or the rating of the currently selected
+         difficulty slot.
+     D4  Singles only or the current style's steps type (the model is dance-single only; doubles charts
+         would be Unrated).
+
+7. BETA COMPARISON (partial) [CODE]
+  - beta eac008e0ac: SORT_METER, UpdateMeterSort and GetMeterToSongsMap are present with the same call
+    sites in MusicWheel.cpp (629, 844) and SongManager.cpp:1908. The enum/names differ (section 4). The
+    ScreenSelectMusic.cpp:1915 and SelectSong hunks and the whole Meter section loop were not diffed line by
+    line [UNVERIFIED that they are identical].
+
+8. IN-GAME CHECKS FOR THE USER (none run) AND NEXT STEPS
+  Checks that confirm facts the code reading only implies:
+   1. Meter sort entries: pick a song with charts 9, 11, 14: it should appear under the 9, 11 and 14
+      sections (once each), and a song with two charts at 11 once under 11. (confirms section 2).
+   2. In Meter sort, scroll to a chart in section 11 of a song: the difficulty slot shown on the right should
+      jump to the chart whose official meter is 11 (confirms ScreenSelectMusic.cpp:1915).
+   3. In a profile-less/guest session, check the Meter sort for doubles charts mixed with singles when
+      the style is not yet chosen (section 2, "playable" bullet).
+   4. LogWheelTimings on: Meter sort build + filter time and item count (section 2 cost; confirms ~1
+      item per chart).
+   5. Quit and restart after selecting Series, Recent and Meter in turn: only Meter should come back from
+      the profile on v1.3.0 (confirms IsSongSort behavior).
+  Next steps (not started; need the user's go-ahead and decisions D1-D4):
+   P1. Parity harness: compile the C++ port stand-alone against the exported chart features
+       (extract_chart_features.py output) and compare to DifficultyModel.lua results for the whole library;
+       report any rating that differs.
+   P2. Write the engine patch (v1.3.0 first, then beta) and the SL patch; git apply --check and g++
+       -fsyntax-only as for the earlier patches; fork Actions build.
+   P3. In-game tests (to be written with the patch).
+  Open: whether to also offer the sort as a DefaultSort choice; whether Casual mode needs it.

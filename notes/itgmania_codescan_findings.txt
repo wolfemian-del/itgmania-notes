@@ -1,0 +1,149 @@
+ITGMANIA CODE ANALYSIS - CODE SCANNING ALERT TRIAGE (FORK)
+REVISION: 2026-10-16-c | file: notes/itgmania_codescan_findings.txt
+
+FILE STATUS
+ status:     COMPLETE 2026-10-16: 0 open alerts [OBSERVED by the user]: 473 extern/ closed by the filter, #427
+             closed by the fix, #461/#4/#5 dismissed by the user. Alerts #464, #461, #427, #4, #5 assessed; #427 fixed; extern/ filter WORKS: after the
+             runs on release cbeaa30 / beta 29275af 473 alerts closed and 3 src/ alerts remain open
+             [OBSERVED by the user, 2026-10-16]. Game/build still not run by Claude.
+ basis:      fork github.com/wolfemian-del/itgmania, release 51bf20206 (= v1.3.0 + patches); beta 7b83223dd.
+             FFmpeg submodule pin 9bc0bcce7a03 (for #464).
+ topic key:  codescan
+ read when:  GitHub code scanning (CodeQL) alerts appear on the fork and need a keep/dismiss/fix decision.
+ see also:   INDEX.md (forks, build workflow); loadmem/beta notes list other possible bugs found by reading.
+
+1. ANSWER (lead)
+ Of the five alerts looked at, ONE is worth fixing: #427 (malloc/delete mismatch). It is a real
+ defect in the code but with very low practical risk; fixed with a one-line change, committed and
+ pushed to both fork branches (section 5). The other four are true to the pattern CodeQL matches
+ but harmless in this program: recommend dismissing as "won't fix" (extern/ alerts: third-party;
+ src/ alerts: no realistic failure).
+ The user states most open alerts are in extern/ (vendored FFmpeg etc.) and that these 4 src/ alerts
+ (#461, #427, #5, #4) are ALL the src/ items. None of the alerts is in code the fork's patches touch.
+ [INFERRED from the patch list; the diff against v1.3.0 was not run, the tag is absent in the shallow clone.]
+
+2. HOW THE ALERTS WERE READ (limits)
+ [TESTED] The session credential cannot read the code-scanning API (HTTP 403 "Resource not accessible
+ by integration"; the alert pages 404 without login; the sandbox GH_TOKEN is invalid). The user pasted
+ the alert text (rule, file:line, data-flow). Findings below follow the pasted line numbers.
+ Claude cannot run CodeQL or the game: every behavior statement is [CODE] or [INFERRED], not tested.
+
+3. #464 - extern/ffmpeg/libavcodec/jpeg2000_parser.c:124 - cpp/unsigned-difference-expression-compared-zero
+ [CODE] Line 124-125 (FFmpeg 9bc0bcce; identical on FFmpeg master at fetch time):
+   m->skip_bytes = (state64 & 0xFFFFFFFF) - 9 > 0 ? (state64 & 0xFFFFFFFF) - 9 : 0;
+   state64 is uint64_t, so the subtraction wraps for values 0..8 and "> 0" is false only for exactly 9.
+   skip_bytes is uint32_t, so the wrapped value is truncated to about 4 billion.
+ [INFERRED] The value is the 4-byte Psot (tile-part length) of a JPEG 2000 codestream. A corrupt or
+   crafted file with Psot 0..8 makes the parser skip about 4 GB of input, so it stops finding frame
+   boundaries. The skip loop is bounded by buf_size, so this is not a memory-safety bug. Psot = 0 is
+   legal in the spec ("to end of codestream"), so one legitimate value triggers it.
+ [CODE] The fork's FFmpeg configure flags (.github/workflows/ffmpeg-w32.yml) do not disable parsers;
+   avcodec-59.dll contains "jpeg2000" strings, so the parser is probably built in. [INFERRED] ITGmania
+   would only reach it by loading a deliberately malformed JPEG 2000 video as an asset.
+ VERDICT: true positive in vendored code, no realistic impact. NOT FIXED. Dismiss as "won't fix:
+ third-party". A fix would be (compare before subtracting):
+   const uint32_t psot = state64 & 0xFFFFFFFF; m->skip_bytes = psot > 9 ? psot - 9 : 0;
+ Better reported to FFmpeg than patched locally. [UNVERIFIED] whether already reported upstream.
+ Other extern/ "unsigned difference" alerts are probably the same pattern (not read).
+
+4. #461 - src/NoteDataUtil.cpp:1482 - cpp/uncontrolled-arithmetic ("uncontrolled data in arithmetic expression")
+ [CODE] Shuffle/super_shuffle case (lines 1478-1485): int iShuffleSeed = GAMESTATE->m_iStageSeed;
+   do { RandomGen rnd(iShuffleSeed); std::shuffle(...); iShuffleSeed++; } while (!memcmp(...)).
+   m_iStageSeed is a plain int (GameState.h:138), set from rand() at GameState.cpp:326, 1237, 2557.
+   RandomGen is MersenneTwister, ctor MersenneTwister(int iSeed = 0) (RageUtil/RandomNumbers.h).
+ [INFERRED] ++ could overflow only if the seed is INT_MAX. On Windows (MSVC/MinGW) RAND_MAX is 32767,
+   so it cannot happen; on glibc/macOS rand() could return INT_MAX with probability about 1 in 2^31,
+   and the loop only runs when the first shuffle leaves the order unchanged. Signed overflow is
+   technically undefined but in practice wraps, and the seed is not an index or size, so no memory
+   corruption. Seeding from rand() is intentional (same shuffle for both players in a round). CodeQL
+   treats any rand() source as "uncontrolled".
+ VERDICT: false positive in practice. NOT FIXED. Dismiss. (Cheapest change if wanted: unsigned seed
+ with a cast at the RandomGen call; not worth touching upstream code.) The same pattern is likely
+ behind ArrowEffects.cpp:659, Course.cpp:537 and the soft-shuffle seed at NoteDataUtil.cpp:1513 if
+ they are flagged later.
+
+5. #427 - src/RageSurfaceUtils_Palettize.cpp:293 - cpp/new-free-mismatch (mismatching new/free or malloc/delete)
+ [CODE] mediancut() allocates the colormap with malloc(sizeof(struct acolorhist_item) * newcolors)
+   (line 324-325) and returns it; Palettize() stores it in acolormap (line 151) and released it with
+   "delete acolormap;" (line 293). The other cleanups in that function are correct (pam_freeacolorhist
+   uses free; thiserr/nexterr use new[]/delete[]).
+ [INFERRED] Undefined behavior. acolorhist_item is a plain struct without a destructor and on MSVC,
+   glibc and macOS operator delete reaches the same free(), so it works today. It would fail under
+   debug-heap checkers (MSVC debug CRT, ASan, Valgrind report allocator mismatch) or with a custom
+   allocator where new/delete and malloc/free use different heaps. Likely symptom: a crash or assertion
+   while loading a texture that gets palettized, not a gameplay bug.
+ FIX (applied): line 293 "delete acolormap;" -> "free(acolormap);  // allocated with malloc in mediancut()".
+   free(nullptr) is safe, so the case where acolormap stayed nullptr still works. <cstdlib> is already
+   included and free() is already used in the file (line 60).
+ [CODE] Checked: same line, same malloc, on release and beta. g++ -fsyntax-only was run only on a
+   stand-alone malloc/free snippet (the file itself was not compiled: it needs the project headers).
+ STATUS: committed and pushed 2026-10-15 to the fork:
+   release  51bf20206 -> d5f0548   beta  7b83223dd -> bd26dd6
+   (commit "RageSurfaceUtils::Palettize: free() the malloc'd colormap instead of delete", with the
+   Co-Authored-By and Claude-Session trailers.) The push triggers the fork's Actions build
+   (release.yml); the result was not read, so the build is UNCONFIRMED. Patch copy:
+   patches/palettize_free_colormap.patch (git format-patch of the release commit; applies to both).
+ SUGGESTED: send the same one-liner upstream to itgmania/itgmania as a PR (not done).
+ IN-GAME CHECK (user): after the fork build, run the game and load anything that palettizes a texture
+   (a theme with paletted banners or a character/background cache); expect no change. A crash on load
+   would be a new regression, which is not expected.
+
+6. #4, #5 - src/arch/Sound/ALSA9Helpers.cpp:181 and :194 - cpp/alloca-in-loop
+ [CODE] Alsa9Buf::GetSoundCardDebugInfo(): line 181 dsnd_ctl_card_info_alloca(&info) inside the
+   dsnd_card_next() loop; line 194 dsnd_pcm_info_alloca(&pcminfo) inside the nested device loop. The
+   macros (ALSA9Dynamic.h:28-36) call alloca(), which is not released until the function returns.
+   The function returns at once on later calls ("static bool done").
+ [INFERRED] Stack growth is cards x devices x a few hundred bytes (a few KB at worst) against an 8 MB
+   default stack. [CODE] The file is Linux/ALSA only; the Windows build does not compile it.
+ VERDICT: true to the pattern, harmless. NOT FIXED. Dismiss as "won't fix". If ever wanted: allocate
+   once above each loop (the structs are reused per iteration) or use a std::vector<char>.
+
+7. EXCLUDING extern/ (400+ alerts, user decided not to review them) AND ALERT HANDLING
+ [CODE] .github/codeql/codeql-config.yml already has "paths: [src]" and "paths-ignore: [extern]", and
+   .github/workflows/codeql.yml (job "Analyze C++", build-mode: manual, triggers: push to release/beta on
+   C/C++ file changes, PR to beta) loads it. [INFERRED] extern/ alerts still appear because paths /
+   paths-ignore are not honored for compiled languages (the build is traced). [UNVERIFIED] re-check
+   against the current GitHub docs.
+ FIX (applied 2026-10-15, release 16614f1, beta fb259b3; patch copy patches/codeql_filter_extern.patch):
+   the analyze step now uses "upload: never" and "output: sarif-results"; a new step runs jq over each
+   SARIF to drop results whose location uri starts with "extern/"; a third step uploads the filtered
+   directory with upload-sarif@v4 and the SAME category "/language:c-cpp" (so GitHub matches the old alerts).
+   jq filter: .runs[].results |= map(select(all(.locations[]?.physicalLocation.artifactLocation.uri;
+   (startswith("extern/") | not)))). [TESTED] the jq filter on a hand-made SARIF (drops results under
+   extern/, keeps src/ results and results with no location). The workflow YAML parses. NOT TESTED in
+   Actions: the output dir name, the *.sarif glob and the uri form (expected relative, "extern/...") are
+   assumed from the CodeQL action docs and need confirming on the first run.
+ CORRECTION 2026-10-16: the filter commits (release 16614f1, beta fb259b3) touched only codeql.yml, which the
+   workflow's own push path filter (**.h, **.cpp, ...) does not match, so NO CodeQL run happened on them
+   [CODE/TESTED via gh run list]. The CodeQL runs that did finish (release d5f0548, beta bd26dd6, 2026-10-16
+   02:50Z) used the OLD workflow, so the 475 alerts persisting after them says nothing about the filter.
+   Fix: release cbeaa30 and beta 29275af add workflow_dispatch and the paths ".github/workflows/codeql.yml"
+   and ".github/codeql/**" to the push trigger; both runs started 2026-10-16 10:58Z (result unread). The
+   filtered workflow is therefore first tested by those runs. Roughly 25-35 min per run.
+ RESULT 2026-10-16 [OBSERVED by the user; run conclusions read by Claude with gh]: the CodeQL runs on release
+   cbeaa30 and beta 29275af completed successfully; 473 alerts (the extern/ ones) are now closed and 3 src/
+   alerts remain open. [INFERRED] the three are #461, #4 and #5 (the user did not name them) and #427 closed
+   with the free() fix; verify on the alerts page. First-run checks (a)-(d) below are therefore met in
+   substance; the .sarif listing in the filter step log was not read.
+ EXPECTED: [INFERRED] when the next scan uploads results without the extern/ alerts, GitHub marks them
+   "Fixed" automatically (same category and branch); no manual dismissal. Check the count after the first
+   run. If some remain, close them in bulk in the alerts UI (needs the user; the session cannot read or
+   change alerts, API 403) or with a script using a token with security_events scope.
+ FIRST-RUN CHECKS (user): (a) the "CodeQL Advanced" run on the push passes; (b) the "Remove extern/
+   results" step lists a .sarif file in sarif-filtered (an empty listing means the glob/dir name is wrong);
+   (c) the alert count falls and no new extern/ alert appears; (d) src/ alerts still appear (a bad filter
+   would hide everything, e.g. #461, #4, #5 should remain until dismissed).
+ ALERT HANDLING: #427 should close after the rescan of the pushed fix; #461, #4, #5: dismiss as "won't
+   fix" / "false positive" with a one-line reason (sections 4, 6). Not chosen: building without FFmpeg
+   (changes what CodeQL analyzes), or turning code scanning off (would hide src/ alerts).
+
+8. OPEN / NEXT
+ - DONE: the user confirmed the 3 open alerts were #4, #5, #461 and dismissed them; #427 closed by the fix;
+   0 active alerts remain (2026-10-16). Only the optional upstream PR for #427 / FFmpeg report for #464 are left.
+ - Release.yml/CI builds for the pushed commits: CI and Release runs on the filter commits show success
+   (gh run list); these commits contain the free() fix, so the fork's Windows build (Release workflow) and CI pass with it; the game itself was not run. Confirm the 3 open alerts are
+   #461/#4/#5 and dismiss them (section 7).
+ - Confirm alert #427 closes after the rescan.
+ - Optional: upstream PR for #427; report #464 to FFmpeg.
+ - Not assessed: the rest of the extern/ alerts (user: "the vast majority"); only #464 was read.
+ - Other upstream-code observations of the same kind live in the loadmem/beta/padsensor notes.

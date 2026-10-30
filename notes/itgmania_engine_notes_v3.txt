@@ -1,0 +1,273 @@
+ITGMANIA ENGINE ANALYSIS - CORE NOTES (architecture, series state, to-do, errata)
+=================================================================================
+REVISION: 2026-10-12-a | file: itgmania_engine_notes_v3.txt | bytes: 16018
+Replaces itgmania_engine_notes.txt (rev 2026-10-07-b, 76512 bytes) after the
+user compares and replaces it. STAGE-2 SPLIT: no new code findings. The per-topic
+sections 4 and 7b-7w moved to three topic files; section IDs are UNCHANGED
+because other files cite them. The ls /mnt/project check procedure (old section
+00) was removed: it hit container rate limits and the project instructions no
+longer ask for it.
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE; read sections 0-2, 5, 6 and 8 at the start of source work.
+  VERSION BASIS: v1.3.0 (8a3bf8884a); beta head last seen 7b34bfe2ac (7v).
+  TOPIC KEY:     architecture map, workspace setup, Series state, to-do list,
+                 known-wrong claims
+  READ WHEN:     starting source work; before repeating any earlier claim (8).
+  SECTION MAP (where each ID now lives):
+    this file ................ 00, 0, 1, 2, 3, 3a, 5, 5b, 6, 8
+    itgmania_load_memory_findings.txt .. 4, 4a-4g, 7p, 7q, 7s
+    itgmania_toggle_findings.txt ....... 7f, 7g, 7h, 7k, 7l, 7m, 7n, 7v, 7w
+    itgmania_beta_findings.txt ......... 7b, 7c, 7d, 7e, 7i, 7j, 7o, 7r, 7t, 7u
+  SEE ALSO:      the companion files below.
+Audience: the model (Claude), to resume analysis after a usage-limit
+interruption or in a new chat. User-facing writeups come later.
+Companion files (plain text, in project knowledge):
+  itgmania_series_notes.txt, itgmania_editor_notes.txt,
+  itgmania_editor_clipboard_mouse_notes.txt, itgmania_input_notes.txt,
+  itgmania_padsensor_notes.txt, itgmania_misc_notes.txt (WASAPI, BrokeIO,
+  show-one-in-row, websocket deflate), itgmania_pack_toggle_sketch.txt
+  (engine sketch + patch descriptions, Parts A-I), and the patches
+  itgmania_pack_toggle_v1_3_0.patch, itgmania_pack_toggle_ui_v1_3_0.patch,
+  sl_toggle_songs.patch (+ sl_toggle_songs_manual_edits.txt),
+  wheel-timing-log.patch (pref LogWheelTimings; Log.txt "WheelTiming:"),
+  itgmania_clang_format_fix.patch (apply last), sl_song_search_shortcut.patch
+  (Simply Love only, see 7m). Difficulty-rating files: see /INDEX.md.
+  FILENAME NOTE: project copies of the patches use UNDERSCORES
+  (..._v1_3_0.patch) or dots (..._v1.3.0.patch); same files.
+Written 2026-09-29. Tags: [CODE] read in source, [INFERRED] reasoned from
+code, not run, [UNVERIFIED] not determined, [TODO] not yet done, [TESTED]
+user-run or synthetic test (source named).
+
+
+00. FILE MANIFEST
+-----------------
+The manifest and the sizes table live in /INDEX.md (FILE STATUS TABLE). The
+old "ls -l /mnt/project" start-of-chat check was removed 2026-10-12 (it
+consistently hit a container rate limit). Rules kept from it:
+  - Never ask the user to add, upload or replace a project file until the
+    Project doc list AND the documents block are both checked and the file
+    is absent from both.
+  - A file in the doc list but not in the index is UNLISTED: say "present,
+    not in the index", add a row at the next edit, ask the user for nothing.
+  - When a file is changed: bump its REVISION (YYYY-MM-DD-letter), update its
+    row in /INDEX.md, tell the user the new size in kB (1 kB = 1000 bytes, as
+    the project panel shows it).
+  - A refactor is written to a NEW filename first; the user compares, then
+    replaces the old file.
+
+
+0. THE TASK AND THE USER
+------------------------
+- User finds ITGmania docs incomplete for recent features. Repo:
+  https://github.com/itgmania/itgmania.
+- First case: "Series" (v1.3.0), done (series notes). Then performance and
+  memory questions about section grouping (section 4).
+- 2026-09-30: user set the to-do list aside for a practical feature idea
+  (pack/song toggle, 7f); it was patched, built and field-tested (7g, 7h, 7n).
+- Format preference: PLAIN TEXT writeups for now; a second stage later turns
+  notes into user-oriented docs. Keep tags and technical detail.
+- User knows I cannot run the game (no display). Label every claim.
+- User is a novice builder (Windows 11, GitHub Actions fork builds).
+
+
+1. HOW TO RE-CREATE THE WORKSPACE (sandbox resets between chats)
+----------------------------------------------------------------
+  cd /home/claude
+  git clone --quiet https://github.com/itgmania/itgmania.git
+  cd itgmania && git checkout -q v1.3.0      # commit 8a3bf8884a
+  # Simply Love is a git SUBMODULE (empty after clone). Fetch it:
+  git clone --quiet --depth 1 https://github.com/Simply-Love/Simply-Love-SM5.git /home/claude/sl
+  # v1.3.0 pins Simply Love dd06138 (shallow clone matched on 2026-09-29).
+- Network: github.com, api.github.com, raw.githubusercontent.com allowed;
+  general web search works. api.github.com is rate-limited without a token:
+  use git instead.
+- Tags: v1.0.2 v1.1.0 v1.2.0 v1.2.1 v1.3.0. Default branch "release" =
+  v1.3.0. Development is on "beta": head e4b4bf0755 (author 2026-09-18,
+  committer 2026-10-03), 84 commits over v1.3.0 [CODE, 7r]. Fetch:
+  git fetch origin beta:beta ; PR heads: git fetch origin pull/1488/head:pr1488
+- Useful: git log v1.2.1..v1.3.0 -i --grep=series ; grep -rIn -i WORD src
+
+
+2. ARCHITECTURE MAP  [CODE unless noted]
+----------------------------------------
+Engine is C++ (StepMania 5.1 fork) in src/; themes are Lua/INI under
+Themes/. Docs: Docs/Luadoc/LuaDocumentation.xml (hand-written Lua API),
+Docs/Userdocs, Themerdocs, Devdocs, Changelog_sm5.txt.
+
+Data model
+  SongManager (SONGMAN) owns all Song*, Group*, Course*. Maps:
+    m_mapNameToGroup (Group by folder name), m_mapNameToSeries (name,
+    set<Group*>, banner path).
+  Group: one per pack folder; parses Pack.ini. Song: one per song folder;
+  owns Steps. Steps: a chart (note data lazy, metadata resident).
+  GameState (GAMESTATE): sort order, expanded section names.
+
+Song loading - SongManager::LoadSongDir (ONE call, for "Songs/"; extra song
+  folders are VFS mounts merged into it, see 7p)
+  1 list pack folders (sorted); 2 sanity-check each; 3 list song folders per
+  pack; 4 build one flat song list; 5 load all songs on a thread pool
+  (hardware_concurrency threads) via Song::LoadFromSongDir. FastLoad=true
+  (default) loads from a per-song cache file (SSC format, no note data) when
+  valid, else parses the simfile. Group(sDir, sGroupDirName) reads Pack.ini.
+
+Music wheel (MusicWheel.cpp, WheelBase.cpp, MusicWheelItem.cpp)
+  - Per sort order: BuildWheelItemDatas -> unfiltered vector cached in
+    m__UnFilteredWheelItemDatas; FilterWheelItemDatas -> m__WheelItemDatas.
+    Status INVALID / NEEDREFILTER / VALID. BeginScreen marks built sorts
+    NEEDREFILTER (refilter on each entry); SORT_PREFERRED always rebuilds.
+    Pref PreCacheAllWheelSorts (default false) builds all sorts eagerly.
+  - SetOpenSections rebuilds m_CurWheelItemData by walking the WHOLE
+    filtered list, skipping non-visible rows (songs show only if their group
+    section is expanded).
+  - WheelBase keeps a small fixed vector of display actors (NUM_WHEEL_ITEMS,
+    metric NumWheelItems) rebound to data near the cursor.
+  - Sort enum in GameConstantsAndTypes.h; SongUtil::SortSongPointerArrayBy*.
+Themes: Themes/_fallback (engine defaults); Simply Love (submodule) is the
+  main real-world theme.
+Disk caches (Cache/): per-song SSC cache, image cache (images + images.cache
+  index), song index (SongCacheIndex).
+
+
+3. SERIES FEATURE - STATE (full detail: itgmania_series_notes.txt)
+------------------------------------------------------------------
+Complete for v1.3.0. Headlines:
+  - Pack.ini [Group] keys Series, SeriesBanner; Version must be non-empty or
+    the whole file is ignored.
+  - SORT_SERIES creates ParentSection wheel rows: Series -> Group -> Song.
+  - Banner: first loaded pack with a resolvable SeriesBanner, else the banner
+    of the alphabetically first pack folder name.
+  - v1.3.0: every non-empty Series gets a parent row, even for one pack.
+    Beta hides it for single-pack series (05507f6b40). PR #1488 (sukibaby) is
+    a second implementation, closed unmerged (7s).
+  - Simply Love: Series is the default sort ("DefaultSort"); theme pref
+    HideInactiveSeries -> engine metric OnlyShowActiveParentSection.
+  - Commits: 5cda97c0fb (2026-04-09 SORT_SERIES), 36dc1925bd (2026-06-22
+    SeriesBanner), 0c85f6c2c3 (2026-06-29 docs). Proposal: issue #266.
+  - Beta re-diff: series files unchanged since 28e58a78c7 (7r).
+
+3a. SeriesBanner "first loaded" order (v1.3.0) [CODE: SongManager.cpp
+    LoadSongDir ~438-500, ~650-678, AddGroup ~396-414, GetSeriesBannerPath
+    ~834-857; RageUtil.cpp 893-906; StdString.h 55]
+  - SortRStringArray uses CompareNoCase (case-insensitive) but its output
+    goes into std::map<string,vector<string>> mapGroupSongDirs; later loops
+    iterate the map = byte order, CASE-SENSITIVE (uppercase before
+    lowercase). AddGroup (which sets the Series banner) runs in that order.
+  - The fallback banner (GetSeriesBannerPath) uses the min group name by
+    std::string operator<, consistent with the above.
+  - Groups with 0 loaded songs are erased before AddGroup.
+  - Not tested; check: folders "Zeta" and "alpha" both defining SeriesBanner.
+
+
+4. PERFORMANCE / MEMORY FINDINGS
+--------------------------------
+MOVED to itgmania_load_memory_findings.txt (sections 4, 4a-4g; 7p, 7q, 7s
+sit there too). Headline: section grouping only hides wheel rows; it does not
+limit what is held in memory. No measurement was made except the wheel
+timing logs in 7n / 7w (toggle findings file).
+
+
+5. CONCEPTS WORTH REMEMBERING
+-----------------------------
+- "Group" in code == "pack" to users. "Section" wheel rows are groups;
+  "ParentSection" rows are series.
+- GetDirListing(path, out, bOnlyDirs, bReturnPathToo): path is a pattern.
+- Pack.ini keys are parsed only when [Group] Version is non-empty.
+- ITGmania additions vs StepMania: Pack.ini/Group, sync-offset ITG/NULL
+  handling, note annotations/tech counts in caches, threaded song loading,
+  USB custom songs with Pack.ini (PR #1072).
+
+
+5b. BETA BRANCH SURVEY (first made at 28e58a78c7, 78 commits; now 84 over v1.3.0)
+--------------------------------------------------------------------------------
+[CODE: git log v1.3.0..beta; docs check = grep of Docs/ on beta. Subjects
+ first; behavior was then read per item as listed.] Version string 1.4.0
+ (e2fcbf4155). Docs/ on beta differs from v1.3.0 only in Luadoc/Lua.xml and
+ LuaDocumentation.xml. Candidates and where they are written up:
+  - Editor (Crash Cringle, Aug-Sep 2026): waveform, Adjust Sync (editor
+    notes); clipboard, undo/redo, mouse wheel/zoom, mouse drag (clipboard/
+    mouse notes). No docs for any.
+  - Input: "|" alternate codes (a657f14ed7); close-folder fallback
+    "@MenuDown-MenuUp" (ed19477cc6, edd3860083) (input notes, 7b);
+    "show one in row" (eefb37e388) (misc notes 3, 7i).
+  - Pad sensors (din): PadSensor Lua classes (documented), SnekConfig and
+    PumpHID sensor data (undocumented) (padsensor notes, 7c).
+  - Lights: BrokeIO driver (9529b84834) (misc notes 2, 7e).
+  - Series: series notes 12 (05507f6b40, 200c304220, SortOrder reorder, 7r).
+  - Other: WASAPI default on Windows (2ae7bf08ce) (misc 1); websocket
+    deflate (2714ea8ada) (misc 4, 7j); noteskins (default pump couples,
+    renamed variants); tech counts / note annotations / per-player column cues
+    for couples and routines (9c2038c41b, cd391a4546); memory-card and
+    profile fixes (Tater, sjrc6); NSIS installer rework (sukibaby);
+    TestLightEvent in ScreenTestLights (3e79f521a8). The last group has NOT
+    been read beyond subjects. Commits after 28e58a78c7: 7t.
+
+
+6. OPEN QUESTIONS / TO-DO (numbering kept; others cite "section 6 item 7")
+--------------------------------------------------------------------------
+  0, 1, 2, 3, 3a, 5, 6, 7, 9: DONE (see 4d, 3a, series notes 12, 5b, 4e,
+     4f/7q, the companion files, 7f).
+  4. DECIDED not feasible here (4g).
+  8. OPEN: second stage, turn notes into user-oriented docs.
+  10. Code-checkable leftovers. STILL OPEN: cache-file pruning (orphaned
+     cache files for renamed folders); SeriesBanner wildcard and Pack.ini
+     filename case; "~"/"!" input prefixes; OptionsList input path;
+     ScreenEdit Ctrl+K course branch; Alter-menu bSaveUndo for cut;
+     edit-screen clickable elements vs mouse drag; engine mixer resampling;
+     hidapi permissions on Windows/macOS; use of Pack.ini Year; theme
+     wheel-row images; the 20 IXWebSocket commits (v11.4.6 -> v12.0.1);
+     PR #1447 vs beta 05507f6b40 (same change?); noteskin/couples/annotation
+     commits (5b "Other"); release-note mention of the profile Priority
+     order change (7t item 5). Web/git only: BrokeIO dance mapping intent;
+     upstream docs for "|"; repo-wide licensing.
+     DONE: 7k, 7l (Adjust Sync target timing, INI duplicate keys, SongID::
+     ToSong/last song/courses for skipped packs), 7o, 7p, 7q, 7r, 7s, 7t, 7u,
+     PR #1488 close reason (7s).
+     Suggested next picks: user retest of duplicate DisabledSongs lines (7l);
+     then the open items above.
+  11. PARTLY DONE (7n, 7v): user built and tested the fork; results for
+     the first 11 test questions are in 7v / sketch Part I. STILL needs user:
+     sketch Part I3 items 12-23 (Series with one pack hidden/skipped, per-song
+     disable surviving a pack toggle, song-toggle save while skipped,
+     malformed DisabledGroups, same-name packs in extra folders, Reload Songs
+     vs startup time, duplicate DisabledSongs lines, last-played song and
+     fixed-song courses with skipped packs, all-skipped/all-hidden, title-menu
+     count); hardware checks.
+  12. Simply Love song-search shortcut (7m): PARTLY DONE: user confirmed F
+     opens the search and it works (7v). STILL needs user: Part I3 items
+     27-36 (the rest of the 7m checks).
+  13. PARKED: Reload Songs clears the saved P1 profile (7v). Fix idea only;
+     the user declined a patch for now and wants it kept for later.
+  14. DONE 2026-10-12: stage-2 split of this file (see header SECTION MAP).
+     Difficulty-rating work is tracked in /INDEX.md and its writeup, not here.
+
+
+8. KNOWN-WRONG CLAIMS (earlier statements corrected; do not repeat)
+-------------------------------------------------------------------
+  1. Close-folder fallback is "MenuUp+MenuDown": WRONG. Beta dance/pump value is
+     "@MenuDown-MenuUp" (7b; swapped from "@MenuUp-MenuDown" by edd3860083).
+  2. Extra song folders are loaded by separate LoadSongDir calls: WRONG. One
+     call; extra folders are VFS mounts (7p).
+  3. SortRStringArray decides SeriesBanner order: WRONG. std::map byte order
+     does (3a).
+  4. Reload(false) re-parses every song: WRONG. FastLoad off only adds a
+     directory-hash validity check; valid cache files are used (7g, sketch A1).
+  5. Song:GetEnabled(): WRONG name; it is Song:IsEnabled() (7f). The new Group
+     method is Group:IsEnabled().
+  6. Undo covers timing changes / 11 SaveUndo calls: WRONG. Note data only; 10
+     call sites (7d).
+  7. IsSongSort change only affects Series: WRONG. Range test also admits
+     Recent, RecentP1/P2, Length (7r).
+  8. "GetCacheFile resolves only Banner": WRONG. All six types (7s).
+  9. A cached load builds timing lookup tables: WRONG. It builds none (7q).
+  10. A leading "_" hides a pack: MYTH. Only "._" does, as a side effect (7f).
+  11. Beta head 28e58a78c7 dates: author 2026-09-26, committer 2026-09-28; the
+      head is now e4b4bf0755 (7r).
+  12. UNRESOLVED (not "wrong"): repeated DisabledSongs lines: user saw the FIRST
+      win, code says the LAST wins (7l).
+  13. "Entering the service menu via the operator key / Reset is why Reload
+      Songs loses the profile": INCOMPLETE, not the cause (2026-10-07). The title
+      route also Resets, and the pref survives Reset. Cause: forced join plus the
+      empty-ID rejoin in SongManager::Reload (7v).
+  14. "Reload Songs returns to the service menu": WRONG. It goes to the title
+      screen ([ScreenReloadSongs] NextScreen=Branch.TitleMenu()) (7v).

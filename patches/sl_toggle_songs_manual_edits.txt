@@ -1,0 +1,67 @@
+SIMPLY LOVE: ADD "TOGGLE SONGS" TO THE OPERATOR MENU (hand edit, no compiling)
+===========================================================================
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, companion to sl_toggle_songs.patch (the same edits
+                 by hand; the patch form is the tested one).
+  REVISION:      2026-10-13-a (en.ini step (a) corrected to match the patch; see below)
+  VERSION BASIS: Simply Love dd06138 (the commit v1.3.0 and beta pin) plus
+                 the patched ITGmania toggle build (itgmania_pack_toggle_v1.3.0
+                 and ..._ui_v1.3.0 patches).
+  TOPIC KEY:     Simply Love, operator menu, Toggle Songs, metrics.ini, en.ini
+  READ WHEN:     the user wants the Simply Love menu entry without applying a
+                 patch, or a patch fails to apply.
+  SEE ALSO:      sl_toggle_songs.patch; sketch Part G and I1 (the patch form was
+                 field-tested: the operator-menu entry works); engine notes 7h, 7v.
+  NOTE:          this hand-edit form itself was not run by me ("Not tested in
+                 game" at the end of the body still applies to it).
+  CHANGE 2026-10-13: the previous revision told you to add "Toggle Songs=Toggle Songs"
+                 under [OptionTitles]. The patch, and the fork's commit 8f8ee1e4, use
+                 "Toggle Songs=🤍  Toggle Songs" (heart, two spaces) so the entry matches
+                 the other operator-menu titles in that section (user's explanation,
+                 2026-10-13). Step (a) below now says so.
+
+Do this AFTER installing the patched ITGmania build. Close the game first.
+Edit two files inside the installed folder, e.g.
+  C:\Games\ITGmania\Themes\Simply Love\metrics.ini
+  C:\Games\ITGmania\Themes\Simply Love\Languages\en.ini
+Use Notepad (or any plain-text editor). Make a backup copy of each first.
+Easier: sl_toggle_songs.patch contains the same edits in diff form.
+
+FILE 1: metrics.ini
+ (a) Find the line starting   local lines = "SystemOptions,MapControllers,
+     and change the end of that line
+        ...,StepManiaCredits,ClearCredits,Reload"
+     to
+        ...,StepManiaCredits,ClearCredits,ToggleSongs,Reload"
+ (b) Find the line   LineGrooveStatsOptions=...   and add right below it:
+        LineToggleSongs="gamecommand;screen,ScreenOptionsToggleSongs;name,Toggle Songs"
+ (c) Find   [ScreenSystemOptions]   and add ABOVE it (blank line between):
+        [ScreenOptionsToggleSongs]
+        Fallback="ScreenOptionsServiceChild"
+        PrevScreen="ScreenOptionsService"
+        NextScreen="ScreenOptionsService"
+
+        [ScreenOptionsToggleSongsSubPage]
+        Fallback="ScreenOptionsServiceChild"
+        PrevScreen="ScreenOptionsToggleSongs"
+        NextScreen="ScreenOptionsToggleSongs"
+
+FILE 2: Languages\en.ini
+ (a) In section [OptionTitles], below the line  Reload Songs=...  add:
+        Toggle Songs=🤍  Toggle Songs
+     (the heart and the two spaces are what the neighbouring lines use, e.g.
+     "Reload Songs=🤍  Reload Songs/Courses"; copy the prefix from that line)
+ (b) In section [OptionExplanations], below  Key Joy Mappings=...  add:
+        Toggle Songs=Turn song packs and individual songs on or off.
+ (c) Below the line  HeaderText=System Options  (section [ScreenSystemOptions])
+     add:
+        [ScreenOptionsToggleSongs]
+        HeaderText=Toggle Songs
+
+        [ScreenOptionsToggleSongsSubPage]
+        HeaderText=Toggle Songs
+Save both files, start the game, open the operator (service) menu: a
+"Toggle Songs" entry should appear above "Reload Songs".
+If the game shows a metrics/script error on start, undo the edits using the
+backups and send me the message. (Not tested in game.)

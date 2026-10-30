@@ -1,0 +1,468 @@
+ITGMANIA MISC BETA ITEMS - WORKING NOTES (beta, NOT in v1.3.0 unless stated)
+=============================================================================
+ 
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, all four items done (hardware/in-game checks only).
+  REVISION:      2026-10-11-a (header added; body unchanged from 2026-10-02)
+  VERSION BASIS: itgmania beta head 28e58a78c7 (some items re-checked on
+                 c8e69b9ca8, 2026-10-01); WASAPI driver itself IS in v1.3.0,
+                 its default-order change is beta only; the rest is beta only.
+  TOPIC KEY:     WASAPI, SoundDrivers, BrokeIO, LightsDriver, ShowOneInRow,
+                 option rows, ArcadeOptionsNavigation, websocket,
+                 enableDeflate, IXWebSocket
+  READ WHEN:     the task touches the Windows sound driver order, the
+                 brokeio lights driver, option-row layout/navigation, or
+                 NETWORK:WebSocket options.
+  SEE ALSO:      padsensor notes (HidDevice, driver-list mechanics).
+ 
+Basis:    Source of itgmania/itgmania branch "beta", head 28e58a78c7
+          (author 2026-09-26, committer 2026-09-28), read 2026-09-30, plus
+          git log. Not built, not run (no Windows, no audio hardware).
+Tags:     [CODE] read in source; [INFERRED] reasoned, not tested;
+          [UNVERIFIED] not determined.
+Contents: 1 WASAPI default (done), 2 BrokeIO lights (done), 3 "show one in
+          row" (done 2026-10-01), 4 websocket deflate (done 2026-10-01).
+ 
+1. WASAPI AS THE DEFAULT SOUND DRIVER ON WINDOWS
+================================================
+Commits [CODE, git log]:
+  768a843d31 2026-06-04 Arthur Eubanks  "WASAPI driver" (the driver;
+             IS in v1.3.0 as a selectable driver)
+  2ae7bf08ce 2026-08-15 Arthur Eubanks  "Make WASAPI the default driver on
+             windows" (beta only; one-line reorder in arch_default.h)
+Docs: grep of Docs/ and Themes/_fallback/Languages/en.ini for WASAPI and
+  SoundWriteAhead returned nothing: not documented. [CODE, grep]
+ 
+1.1 What changed [CODE: src/arch/arch_default.h]
+  Windows sound driver list, tried in order until one Init()s:
+    v1.3.0: DirectSound-sw, WASAPI, WaveOut, WDMKS, Null
+    beta:   WASAPI, DirectSound-sw, WaveOut, WDMKS, Null
+  Only the order changed. Commit message: nobody tests it unless it is
+  default; "after the next release we can revert" if it causes trouble;
+  people can override drivers; the few testers reported only improvements
+  (that is the author's claim, not verified).
+  Other platforms unchanged (macOS AudioUnit, Null; Linux Pulse, ALSA-sw,
+  OSS, JACK, Null).
+  UPDATE 2026-10-01: beta head is now c8e69b9ca8. Commit e9ba1e1526 ("Remove
+  dead build options and backends") removes OSS, so the Linux beta list is
+  Pulse, ALSA-sw, JACK, Null. [CODE: git diff 28e58a78c7 beta, arch_default.h]
+  The Windows order above is unchanged by it.
+ 
+1.2 How the list is used [CODE: RageSoundDriver.cpp Create;
+    RageSoundManager.cpp pref "SoundDrivers", default ""]
+  - Empty pref = platform default list.
+  - A non-empty SoundDrivers value is split on ",". Each entry is checked
+    against the platform's DEFAULT list (exact std::find, so CASE-SENSITIVE
+    here, unlike input drivers); entries not in it are removed with a
+    log warning and a user-facing warning (WarnUserAboutBadSoundDriverEntry).
+    If nothing is left, the default list is used. [CODE]
+  - So to keep the old behaviour on beta, set SoundDrivers=DirectSound-sw
+    (or a list starting with it) in Preferences.ini. [INFERRED from the
+    above; not tested]
+  - If a driver's Init() returns an error the log says "Couldn't load
+    driver X: <error>" and the next one is tried; the chosen one logs
+    "Sound driver: X". [CODE] So a WASAPI failure falls back silently
+    (to DirectSound-sw) apart from Log.txt.
+ 
+1.3 What the WASAPI driver does [CODE: RageSoundDriver_WASAPI.cpp]
+  - SHARED mode only (AUDCLNT_SHAREMODE_SHARED), event-driven
+    (EVENTCALLBACK). There is no exclusive mode and no preference for it.
+  - Device: the system DEFAULT render endpoint (GetDefaultAudioEndpoint,
+    eRender, eConsole). No device-selection preference.
+  - Format: uses the endpoint's shared-mode MIX format as-is. Accepted only
+    if WAVE_FORMAT_EXTENSIBLE with IEEE float, or 16-bit PCM. Anything else
+    (e.g. 24-bit or 32-bit integer mix format) makes Init fail with
+    "Unsupported format ..." and the engine falls to the next driver.
+    Sample rate = the mix format's rate. [CODE]
+  - Buffer: hnsRequestedDuration = 0 (system default) unless the existing
+    preference SoundWriteAhead (frames, default 0) is non-zero, in which
+    case frames are converted to 100 ns units at the device rate. [CODE]
+    Whether the system honours the request in shared mode was not
+    checked. [UNVERIFIED]
+  - Threads: "WASAPI Mixer Thread" at TIME_CRITICAL priority (falls back to
+    ABOVE_NORMAL), plus the shared decode thread at ABOVE_NORMAL. [CODE]
+  - Mixer loop: wait on the audio event (2 s timeout; on timeout it logs
+    "WASAPI: Timeout waiting for audio event" and does Stop()+Start()),
+    then fills all free buffer space (buffer size minus padding). [CODE]
+  - Position: IAudioClock::GetPosition scaled to frames; on failure returns
+    0. Latency: IAudioClient::GetStreamLatency (0 on failure). [CODE]
+  - Decode buffer = 1.5 x the WASAPI buffer size. [CODE]
+  - Log line on success: "WASAPI: Shared mode, N channels, R Hz, Float|
+    Int16, buffer size B frames". [CODE] Useful to see what you got.
+ 
+1.4 Observations (not confirmed defects)
+  a) Default device changes [CODE for absence; INFERRED for effect]: I
+     searched the driver files for endpoint-notification callbacks
+     (IMMNotificationClient etc.); count is in section 1.6. The device is
+     chosen once at Init, so unplugging or switching the default device
+     while the game runs may stop sound until restart or trigger the
+     2 s timeout path. Not tested.
+  b) Shared-mode latency: shared mode goes through the Windows audio
+     engine mixer, so its latency is typically higher than exclusive
+     mode; how it compares to DirectSound-sw on a given machine is not
+     something the code can tell. The engine reports the stream latency
+     to the sync code (GetPlayLatency), so sync offsets could differ from
+     DirectSound-sw. Players may need to re-check Global Offset after the
+     driver change. [INFERRED; not measured]
+  c) Mixed sample rates [INFERRED]: the driver reports the device mix
+     rate; sounds at other rates are presumably resampled by the engine
+     mixer (not checked).
+  d) Failed GetCurrentPadding / GetBuffer just `continue` back to the event
+     wait, so no busy loop unless the event keeps firing. [CODE]
+ 
+1.5 In-game checks (I cannot run Windows)
+  1. Log.txt on a fresh beta install: "Sound driver: WASAPI" and the
+     "WASAPI: Shared mode ..." line (rate, format, buffer).
+  2. Set SoundDrivers=DirectSound-sw: confirm it takes effect; set an
+     unknown name: confirm the warning and fallback.
+  3. Windows sound settings with a 24-bit default format: does the log
+     show "Couldn't load driver WASAPI: Unsupported format" and a
+     DirectSound-sw fallback?
+  4. Same song and pad, DirectSound-sw vs WASAPI: does the timing
+     (Global Offset needed) change? Use the in-game sync tools.
+  5. Change the Windows default output device while the game runs.
+  6. SoundWriteAhead set to a small value: does the logged buffer size
+     change?
+ 
+1.6 Extra grep results
+  - grep for IMMNotificationClient / OnDefaultDeviceChanged /
+    RegisterEndpointNotificationCallback in RageSoundDriver_WASAPI.cpp/.h:
+    0 matches each. [CODE]
+  - Docs/ + en.ini grep for WASAPI / SoundWriteAhead: 0 matches. [CODE]
+ 
+ 
+2. BROKEIO GAMEPAD LIGHTS DRIVER
+================================
+Files: src/arch/Lights/LightsDriver_brokeio.cpp / .h. Not in v1.3.0
+(git merge-base check on 9529b84834: not an ancestor of the tag). [CODE]
+Commits [CODE, git log]: 9529b84834 2026-08-01 navaroli "Add BrokeIO
+  gamepad lights driver support"; f5dfb81aa1 and bea145f6a0 2026-08-13
+  navaroli (workflow errors, clang-format).
+Docs: grep of Docs/ and Themes/ for "brokeio" (any case): 0 hits. The only
+  documentation is the header comment. [CODE, grep]
+ 
+2.1 Enabling it [CODE: LightsManager.cpp ~35, ~116; LightsDriver.cpp
+    Create; LightsDriver.h REGISTER_LIGHTS_DRIVER_CLASS]
+  - Preference LightsDriver (Preferences.ini), comma-separated list.
+    Empty = DEFAULT_LIGHTS_DRIVER = "SystemMessage,Export". A non-empty
+    value REPLACES that default (so "brokeio" alone drops SystemMessage and
+    Export). Registered name is "brokeio"; matching is case-insensitive
+    (istring map, same mechanism as input drivers). Unknown names are
+    skipped with a Trace log. [CODE; the replace-not-add reading is
+    INFERRED from the empty-check, not tested]
+  - Compiled on all platforms: the file is in the unconditional part of
+    CMakeData-arch.cmake. [CODE] The header comment only gives Linux
+    udev examples; on Windows/macOS whether hidapi can open the board
+    without extra setup was not checked. [UNVERIFIED]
+  - Hardware: USB HID vendor 0x1D50, product 0x6181; the header calls it
+    "the brokeio board (in gamepad mode)" using hidapi. Nothing else about
+    the hardware is known from the code. [CODE]
+  - Linux: needs user read/write on the device, e.g. udev rule on
+    ATTRS{idVendor}=="1D50", ATTRS{idProduct}=="6181" (usb subsystem) or
+    KERNEL=="hidraw*"; the example uses OWNER/GROUP "dance", MODE 0660.
+    Those names are example values in the comment. [CODE]
+ 
+2.2 What it sends [CODE: brokeio.h enum, brokeio.cpp Set]
+  One HID output report of 17 bytes: byte 0 = report id 0x00, then 16
+  light bytes, each 0xFF (on) or 0x00 (off), so no dimming:
+    idx 1-5   P1 pad: UL, UR, CN, LL, LR
+    idx 6-10  P2 pad: UL, UR, CN, LL, LR
+    idx 11    NEON       = LIGHT_BASS_LEFT OR LIGHT_BASS_RIGHT
+    idx 12-15 MARQUEE UL, UR, LL, LR  <- cabinet lights UP_LEFT, UP_RIGHT,
+              LR_LEFT, LR_RIGHT (in that order: UL=UP_LEFT, UR=UP_RIGHT,
+              LL=LR_LEFT, LR=LR_RIGHT)
+    idx 16    COIN_PULSE = m_bCoinCounter
+  The static_assert checks the enum length equals 17.
+  Game button lights depend on the CURRENT game's input scheme name,
+  compared case-insensitively, read on every Set() call:
+    "dance": P1_UL=Up, P1_UR=Down, P1_CN=Left, P1_LL=Right (same for P2);
+             the LR byte is not written.
+    "pump":  UL=UpLeft, UR=UpRight, CN=Center, LL=DownLeft, LR=DownRight.
+    any other game: pad bytes are not written at all.
+  Menu/Start button lights are not sent. [CODE]
+ 
+2.3 Write behaviour [CODE]
+  - Set() returns early until dev.FoundOnce() is true (device seen at
+    least once).
+  - The report is written only when the 17 bytes differ from the previous
+    ones (memcmp), then prev is updated.
+  - Uses HidDevice (autoReconnection default true). HidDevice::Write
+    returns Success / NotConnected / OperationFailed; on a failed hid_write
+    it logs "HidDevice ... write failed" and closes the handle.
+ 
+2.4 Observations (not confirmed defects)
+  a) Odd dance mapping [CODE for the mapping; UNVERIFIED whether intended]:
+     dance Up/Down/Left/Right go to the slots named UL/UR/CN/LL, i.e. the
+     pump-style five-panel names. This may match how the board wires four
+     dance lights, or may not. LightsDriver_snek maps dance buttons
+     Up/Down/Left/Right by name, but that says nothing about this board.
+     Check on hardware which physical light each pad byte drives.
+  b) Stale bytes [CODE for the buffer being persistent; INFERRED for the
+     effect]: outputBuffer is a member and only some bytes are written per
+     game. Switching pump -> dance leaves the LR byte at its last pump value
+     (dance never clears it). Running a game that is neither dance nor pump
+     leaves pad bytes at whatever they last were. Not tested.
+  c) Failed write not retried [CODE for ignoring the return value and
+     copying prev unconditionally; INFERRED for effect]: after a failed or
+     disconnected write, prev already equals the new state, so lights are
+     not resent until some light changes. After a reconnect the board could
+     show stale lights until then. Not tested.
+  d) prevOutputBuffer is not initialised [CODE: the constructor
+     initialises only outputBuffer{0}]. The first memcmp compares against
+     indeterminate memory; the practical effect is at most one skipped or
+     extra first write (if garbage happened to equal the first state).
+     Harmless in practice [INFERRED].
+  e) Bass lights map to a single NEON byte (either bass side lights it).
+  f) Set() is not guarded by Threaded-input or any lock; LightsManager
+     calls it from its update; nothing threaded seen. [INFERRED, not
+     deeply checked]
+ 
+2.5 Hardware / in-game checks (I cannot run these)
+  1. LightsDriver=brokeio with the board plugged in: Log.txt should show
+     "Lights driver: brokeio". Without the board it stays silent (no
+     warning, since Set returns while FoundOnce is false).
+  2. On the Test Lights screen (or a cabinet-lights test), step through
+     each pad light: does dance Up light the physical Up arrow? (2.4a)
+  3. Play dance then switch to pump (and back): does a lamp stay lit? (2.4b)
+  4. Unplug and replug the board mid-song: do lights recover without a
+     state change? (2.4c)
+  5. Non-Linux: does the board open without extra permissions?
+ 
+ 
+3. "SHOW ONE IN ROW" WITH A PERSISTENT DOWN ARROW (ARCADE-STYLE MENUS)
+====================================================================
+Basis: same beta head 28e58a78c7 (re-fetched 2026-10-01), plus the diff of
+eefb37e388 and Simply Love dd06138 (grep). Not built, not run.
+Commit [CODE, git log]: eefb37e388 2026-07-02 Arthur Eubanks "Support
+  'show one in row' option in toggle options menu". Files: src/OptionRow.cpp,
+  OptionRow.h (+IsShowOneValueWithGoDown), ScreenOptions.cpp. Not in v1.3.0.
+  No later commit touches those two .cpp files on beta [CODE, git log].
+  Commit message motive: so that e.g. "Notefield X offset" can move into
+  advanced options. No row in the engine or Simply Love was found that was
+  moved because of it [CODE, grep; UNVERIFIED for other themes].
+Docs: Docs/ only describes LayoutType "ShowAllInRow"/"ShowOneInRow"
+  (Themerdocs, Changelog_sm5). Nothing about this behavior. [CODE, grep]
+ 
+3.1 Terms and when it applies [CODE]
+  - "Show one in row" = Lua/option LayoutType "ShowOneInRow"
+    (LAYOUT_SHOW_ONE_IN_ROW): only the focused choice is drawn.
+  - The new behavior (IsShowOneValueWithGoDown, OptionRow.cpp ~876) needs ALL
+    of: m_bFirstItemGoesDown, layout ShowOneInRow, select type SELECT_ONE.
+  - m_bFirstItemGoesDown is true only when the screen's navigation is
+    NAV_TOGGLE_THREE_KEY (ScreenOptions.cpp ~231). ScreenOptionsMaster picks
+    that when the screen metric NavigationMode = "toggle" AND the preference
+    ArcadeOptionsNavigation is non-zero (labels "StepMania Style" / "Arcade
+    Style"); with it zero, toggle screens use NAV_TOGGLE_FIVE_KEY, where
+    nothing changes. [CODE: ScreenOptionsMaster.cpp ~48-54,
+    ScreenOptionsMasterPrefs.cpp ~849]
+  - _fallback [ScreenOptions] NavigationMode=OptionsNavigationMode(), which
+    returns "toggle" when pref ThreeKeyNavigation is on. Simply Love sets
+    NavigationMode="toggle" for ScreenPlayerOptions2, ScreenPlayerOptions3
+    and ScreenAttackMenu (metrics.ini lines 751, 774, 803; the section
+    names were read by a script, not by eye) and "normal" for
+    ScreenOptions (~821). [CODE, SL dd06138] Which rows sit on those
+    screens was not checked [UNVERIFIED].
+  - No opt-in flag: every ShowOneInRow SELECT_ONE row on such a screen gets
+    the new look. Simply Love defines many ShowOneInRow rows
+    (SL-PlayerOptions.lua, SL-OperatorMenuOptions.lua). [CODE, grep]
+ 
+3.2 Behavior before and after
+  Before (v1.3.0) [INFERRED from v1.3.0 code]: the arrow was just choice 0
+  in the one slot. Left/Right cycled arrow -> values (wrapping), nothing was
+  selected until Start; Start selected the focused choice and moved focus
+  back to the arrow.
+  After (beta) [CODE: OptionRow.cpp InitText/UpdateText/PositionUnderlines/
+  GetTextItemForRow; ScreenOptions.cpp ChangeValueInRowRelative/Absolute,
+  ProcessMenuStart]:
+  - The arrow is its own text item (index 0), always drawn at
+    ITEMS_START_X + half its width, using the row's colour. Value text
+    items start at index 1 (per player, or one shared).
+  - The value slot shows the focused value; if focus is on the arrow it
+    shows the currently selected value (or the first value if none).
+  - First Left/Right from the arrow moves focus to the selected value (or
+    first) WITHOUT changing it (the delta is ignored). Further Left/Right
+    change the value, confined to choices 1..N-1; the arrow is not
+    reachable with Left/Right.
+  - Wrap inside the values only if the WrapValueInRow metric is true and the
+    press is not a key repeat; otherwise it clamps at the ends.
+  - Each Left/Right now selects the value at once, even in toggle mode
+    (in toggle mode other rows still need Start).
+  - Start with a value focused: selects it and returns focus to the arrow.
+    Start with the arrow focused: moves down a row (unchanged).
+  - Per-player rows colour the value as "selected" only while that player's
+    focus is on a value, not on the arrow.
+ 
+3.3 Refactor side effects [CODE]
+  ChangeValueInRowAbsolute (unused at v1.3.0) now holds the selection logic;
+  ChangeValueInRowRelative just computes the target and calls it. Both
+  Start paths call Absolute(row, pn, 0, ...) instead of Relative(-focus).
+  a) The "ChangeValue" message (params PlayerNumber, RowIndex) was
+     broadcast only inside Absolute. At v1.3.0 nothing called Absolute, so
+     ChangeValueMessageCommand (added per Changelog_sm-ssc) never fired from
+     input. On beta it fires on EVERY value change and every Start-return to
+     the first choice, before the change is applied, and also when the focus
+     does not actually change. grep for ChangeValueMessage in _fallback and
+     Simply Love dd06138: 0 hits, so no shipped theme reacts. [CODE]
+  b) The "nowhere to move" (<=1 choice) and three-key-menu early returns
+     stay in Relative only. A row with no real choices (just the arrow) used
+     to return early on Start; now Absolute runs (broadcast, AfterChange).
+     Effect small. [INFERRED]
+  c) Absolute ASSERTs iChoiceIndex < number of choices. [CODE]
+ 
+3.4 Observations (not confirmed defects)
+  a) The first Left/Right press from the arrow looks "lost" to the player
+     because the displayed value does not change. [CODE]
+  b) Auto-select calls the handler's NotifyOfSelection on every step (via
+     SetOneSelection), so Lua rows get a callback per step rather than only
+     on Start. [CODE for the call; INFERRED for effect on a given row]
+  c) Text-item indexes shifted by one for these rows. Simply Love code that
+     touches option-row children or text items by index was not checked
+     [UNVERIFIED]; GetTextItemsSize is not Lua-bound [CODE].
+  d) Arrow X uses ITEMS_START_X; whether it looks right in Simply Love's
+     layout was not checked [UNVERIFIED].
+ 
+  e) RESOLVED 2026-10-01 (item c above, Simply Love dd06138; beta
+     c8e69b9ca8 for the engine side) [CODE unless noted]:
+     - SL reads option-row text items by index only in
+       BGAnimations/ScreenPlayerOptions overlay/default.lua:
+       GetOptionRow(i):GetChild(""):GetChild("Item")[PlayerNumber:Reverse()
+       [player]+1] for the rows "Mini" (CalculateScrollSpeed),
+       "SpeedMod" and "NoteSkinVariant" (shared-sides styles use
+       GetChild("Item") without an index). ScreenAttackMenu loads the same
+       overlay (ScreenAttackMenu overlay.redir). ScreenPlayerOptions common
+       (used by PlayerOptions2/3) and ScreenOptionsServiceChild overlay use
+       only the Title child and GetCurrentRowIndex, no item indexes.
+     - The engine now names the arrow and the value items alike ("Item",
+       OptionRow.cpp ~110), so an arrow at index 0 WOULD shift [n] by one;
+       but the arrow exists only if IsShowOneValueWithGoDown, which needs
+       NAV_TOGGLE_THREE_KEY (3.1).
+     - ScreenPlayerOptions (SpeedMod, NoteSkinVariant, Mini) falls back to
+       [ScreenOptions] NavigationMode="normal" in SL (metrics.ini ~821), so
+       it never gets the arrow. SL sets "toggle" only on PlayerOptions2,
+       PlayerOptions3 and AttackMenu. AttackMenu rows are Mini, Perspective,
+       Scroll, 11, 12, 13; Mini has no LayoutType override, so SL gives it
+       "ShowAllInRow" (SL-PlayerOptions.lua ~896), i.e. not ShowOneInRow.
+       Perspective/Scroll/11-13 layouts were not checked [UNVERIFIED].
+       ShowOneInRow rows that DO sit on PlayerOptions2/3 (SL-PlayerOptions
+       .lua ~657, 740, 770 define some) get the arrow, but no SL code
+       indexes their text items. [INFERRED from the overlay list above]
+     - Verdict: no collision in SL dd06138. Risk remains for a theme or SL
+       fork that sets NavigationMode="toggle" on ScreenPlayerOptions with
+       Arcade navigation on: Item[1] would be the arrow and the Mini text
+       parse would read the wrong item. [INFERRED]
+     - Not run.
+ 
+3.5 In-game checks (I cannot run the game)
+  1. Set Arcade Style (and Three Key Menu if needed), open Player Options 2
+     in Simply Love: do ShowOneInRow rows show a fixed arrow plus the value?
+  2. Left/Right once: value unchanged, focus on value; again: value changes
+     and stays without Start; Start: focus back to the arrow.
+  3. Wrap at both ends; hold a direction: does it clamp (no wrap)?
+  4. Switch to StepMania Style: rows look and behave as before.
+  5. Two players, per-player row: colours and arrow per player; one player only.
+  6. Test theme with ChangeValueMessageCommand on a ScreenOptions: count how
+     often it fires (every step, plus Start).
+ 
+ 
+4. WEBSOCKET PER-MESSAGE DEFLATE (Lua NETWORK:WebSocket "enableDeflate")
+=======================================================================
+Basis: itgmania beta head 28e58a78c7; commit 2714ea8ada (2026-07-18,
+  "Brandon W", "Add deflate arguments for network handler, to allow for
+  compressed websocket connections."); IXWebSocket library source at the
+  two commits ITGmania pins (v1.3.0: 2efe037c9c = tag v11.4.6; beta:
+  64fae7676b = tag v12.0.1, bumped by dependabot commit 181461057a,
+  2026-07-01). Not built, not run, no server to test against.
+  Not in v1.3.0 [CODE: git merge-base]. Files: src/NetworkManager.cpp/.h
+  only (+19 lines).
+Docs: grep of Docs/ and Themes/ for "deflate" finds nothing about this
+  option. The Lua doc entry for NETWORK:WebSocket (LuaDocumentation.xml
+  ~3762, "since ITGmania 0.5.1") lists url, headers, handshakeTimeout,
+  pingInterval, automaticReconnect, onMessage; it does NOT list
+  enableDeflate. [CODE, grep]
+ 
+4.1 What the commit does [CODE]
+  - New Lua table field to NETWORK:WebSocket{}: enableDeflate (boolean).
+    Absent or nil = TRUE. A non-boolean value raises the Lua error
+    "enableDeflate must be a boolean".
+  - NetworkManager::WebSocket calls webSocket.enablePerMessageDeflate() if
+    true, else disablePerMessageDeflate(), before connecting.
+  - So on beta every WebSocket opened without the field now ASKS the
+    server for the "permessage-deflate" extension. enableDeflate=false
+    restores the old behaviour.
+ 
+4.2 What the default was before [CODE: IXWebSocket at 2efe037c9c]
+  The library's own default is OFF: WebSocketPerMessageDeflateOptions
+  defaults to enabled=false, and WebSocket() does not set it. NetworkManager
+  at v1.3.0 never touched the setting (grep: no deflate calls). So at
+  v1.3.0 no compression was ever offered. The commit message says
+  "to allow for compressed websocket connections"; in effect it also
+  changes the default from off to on. [CODE for both states; the
+  "default changed" reading is my summary]
+  zlib support is compiled in for both versions: ixwebsocket is built
+  with IXWEBSOCKET_USE_ZLIB (CMakeProject-ixwebsocket.cmake line 114 at
+  v1.3.0 and on beta). Without that define the library would ignore the
+  request. [CODE]
+ 
+4.3 How negotiation works [CODE: IXWebSocketHandshake.cpp,
+    IXWebSocketPerMessageDeflateOptions.cpp, IXWebSocketTransport.cpp,
+    library v12.0.1]
+  - Client handshake adds the header
+      Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=15;
+      client_max_window_bits=15
+    (no *_no_context_takeover parameters; both window sizes 15, the max).
+    enablePerMessageDeflate() uses the defaults of the options object.
+  - If the server's reply has no matching extension, deflate is turned off
+    for that connection and the socket works as before.
+  - If the server accepts it but the zlib engine fails to initialise, the
+    handshake is reported as failed ("Failed to initialize per message
+    deflate engine"), so the connection fails instead of falling back.
+    [CODE; I know of no reason init would fail; not tested]
+  - When active, sent text/binary messages are compressed and received
+    frames with RSV1 are decompressed transparently. The Lua onMessage
+    callback gets the plain data; nothing in the Lua message table says
+    whether compression was used. [CODE for the transport flags; the Lua
+    side was not re-read for an indicator: INFERRED]
+  - The server must support it; a server that does not just ignores the
+    header. A strict server that rejects unknown extensions could refuse
+    the handshake [INFERRED; not tested; no server known].
+ 
+4.4 Who is affected
+  - Simply Love dd06138 opens two sockets and sets neither field:
+    GrooveStats QR login (ws://qrlogin.groovestats.com:3000,
+    BGAnimations/ScreenGrooveStatsLogin underlay/default.lua) and the
+    online lobby handler (Scripts/SL-OnlineHelpers.lua ~508). On beta both
+    will request deflate. Whether those servers support it is
+    [UNVERIFIED]; if not, nothing changes for the player. _fallback does
+    not use WebSocket. [CODE, grep]
+  - Third-party themes/scripts that open WebSockets get the same default.
+ 
+4.5 Observations (not confirmed defects)
+  a) Documentation gap: the option and its default-true behaviour are
+     absent from Docs; theme authors can only find it in the source.
+  b) Silent default change [INFERRED to matter only for servers that
+     misbehave on the extension]: scripts that worked unchanged could
+     break against such servers; the workaround is enableDeflate=false.
+  c) Memory/CPU [INFERRED, not measured]: each connection with deflate
+     active holds zlib deflate and inflate state (window bits 15, the
+     largest). Small next to the rest of the game; relevant only for
+     many connections. Compression is applied to every message, with no
+     size threshold seen in the transport call sites (not read in full).
+  d) Hard failure path in 4.3 (init failure = connect failure, no
+     fallback).
+  e) The dependency was also bumped (11.4.6 -> 12.0.1, 20 commits:
+     DNS lookup change, chunk buffering, TLS cert fix for IP hosts,
+     etc.). I did not review those; they are separate from this commit
+     but ship in the same beta. [CODE for the commit list; not reviewed]
+ 
+4.6 In-game / test checks (I cannot run these)
+  1. Beta: in a test script open NETWORK:WebSocket{url=..., onMessage=...}
+     against a server known to support permessage-deflate (e.g. a local
+     websocket test server); check the server log for the negotiated
+     extension. Repeat with enableDeflate=false: no extension requested.
+  2. enableDeflate="no" (string): expect the Lua error text above.
+  3. Against a server without the extension: connection still opens and
+     messages work.
+  4. Open the GrooveStats QR login / online lobby on beta and confirm they
+     still connect (see 4.4).
+  5. Compare v1.3.0 and beta with a packet capture: the beta handshake
+     should contain the Sec-WebSocket-Extensions line, v1.3.0 not.

@@ -1,0 +1,67 @@
+ITGMANIA - RELOAD SONGS DROPS THE SAVED DEFAULT PROFILE: FIX EVALUATION
+REVISION: 2026-10-14-a | file: notes/itgmania_reload_profile_fix_evaluation.txt
+FILE STATUS: ACTIVE | basis: v1.3.0 (8a3bf8884a); beta 3f5f27725a has an identical SongManager::Reload
+ topic key: Reload Songs clears saved P1 profile | read-when: deciding on / testing the fix
+ see-also: toggle:7v item 4 (the finding), engine:6 item 13, patches/reload_keep_default_profile.patch
+Tags: [CODE] [INFERRED] [UNVERIFIED] [TESTED]. I cannot run the game: nothing here was run in game.
+
+1. ANSWER
+ Fixing it is worthwhile and cheap. One file (src/SongManager.cpp), about 3 changed lines:
+ change the guest branch of the rejoin loop from "} else {" to "} else if (!profileID.empty()) {".
+ [CODE] Applies cleanly (git apply --check) to v1.3.0 and to beta 3f5f27725a.
+ [CODE] g++ -std=c++17 -fsyntax-only on the patched SongManager.cpp (beta tree): exit 0.
+ [UNVERIFIED] Not fully built, not run in game.
+ Independent of the toggle patches (they do not touch Reload).
+ Patch: patches/reload_keep_default_profile.patch.
+
+2. THE BUG (recap, toggle:7v item 4)
+ [CODE] SongManager::Reload records each joined player as (pn, profileID, isMemoryCard), unjoins and
+  unloads them, reloads songs, then rejoins. Guest = profileID "" and isMemoryCard false.
+ [CODE] For a guest the old code ran PROFILEMAN->m_sDefaultLocalProfileID[pn].Set("") ; this is the pref
+  saved as DefaultLocalProfileIDP1/P2 in Preferences.ini, so the saved default is erased.
+ [CODE] How players are guests at that point: service-menu screens force-join all players, then the
+  title screen's GAMESTATE->Reset() leaves them without a profile; Reload then queues (pn, "", false).
+ Observation, not a confirmed defect: the original intent is unknown. Clearing the saved default looks
+  like a side effect of reusing one code path for guests, not a deliberate choice. [INFERRED]
+
+3. WHY BOTH CALLS MUST BE SKIPPED FOR GUESTS
+ [CODE] LoadLocalProfileFromMachine(pn) reads the pref; empty ID -> returns false with m_sProfileDir="";
+  non-empty ID -> loads that profile.
+ A naive fix that only drops the Set("") would leave LoadLocalProfileFromMachine running against the
+  saved default, so a player who was a guest would get the default profile loaded. This matters on the
+  ScreenInstallOverlay path (Reload after installing songs, mid-session).
+ Skipping both calls is behavior-equivalent for guests apart from the pref write:
+  [CODE] UnloadProfile already left m_sProfileDir empty (IsPersistentProfile false),
+  [CODE] GameState::LoadCurrentSettingsFromProfile returns early for a non-persistent profile.
+
+4. PERSISTENT-PROFILE BRANCH (unchanged by the patch)
+ [CODE] Set(profileID) writes the ID the pref normally already holds (the selection paths
+  GameCommand.cpp:839, ScreenSelectProfile.cpp:219, ScreenOptionsManageProfiles.cpp write it too), so it is
+  usually a no-op. [INFERRED] A case where it differs: profile chosen without writing the pref.
+ Optional hardening, NOT done: save the old pref value and restore it after the load.
+ Observation [CODE], unrelated, not fixed: if a persistent profile's GUID matches no local profile, the
+  player is unjoined and not rejoined.
+
+5. CALLERS OF Reload [CODE]
+ ScreenReloadSongs.cpp:80 (service menu "Reload Songs", OnlyLoadAdditions=false; NextScreen =
+  Branch.TitleMenu()) and ScreenInstallOverlay.cpp:171 (after installing songs).
+ LoadAdditions (Simply Love "Load New Songs") never calls Reload, so it is not affected.
+
+6. RISK
+ Low. Only the guest case changes: no pref write, no profile load. Memory-card and persistent branches
+  untouched. [INFERRED] No side effects elsewhere; no other code reads the cleared pref after Reload
+  in a way that depended on it being empty (not exhaustively searched).
+
+7. IN-GAME CHECKS (user-run; none done yet)
+ 1. Set a default P1 profile. Service menu > Reload Songs. Quit cleanly and confirm
+    DefaultLocalProfileIDP1 is still in Preferences.ini (unpatched build: it becomes empty).
+ 2. Reload while a guest (no profile attached). Confirm no profile is attached afterwards and the
+    default pref is unchanged.
+ 3. Reload with a persistent profile loaded (e.g. via ScreenInstallOverlay if you can trigger it);
+    confirm it is restored.
+ 4. Memory-card profile: unaffected, same as before.
+ 5. After step 1, start the game fresh: the default profile should auto-load as before.
+
+8. STATUS / NEXT
+ Patch drafted, syntax-checked, NOT committed or pushed to the forks (release, beta) yet.
+ Next: user decides; if yes, commit to wolfemian-del/itgmania release and beta, then run checks above.

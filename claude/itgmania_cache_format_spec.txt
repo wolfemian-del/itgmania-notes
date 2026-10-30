@@ -1,0 +1,94 @@
+ITGMANIA SONG CACHE FILE FORMAT - SPEC FOR THE FEATURE EXTRACTOR (v1.3.0)
+=========================================================================
+REVISION: 2026-10-09-a | file: itgmania_cache_format_spec.txt
+Basis: itgmania/itgmania tag v1.3.0 src/, read 2026-10-09. No real cache file
+       was inspected (no build here); everything is from the writer/loader
+       code. Tags: [CODE] read in source, [INFERRED], [UNVERIFIED].
+Used by: extract_chart_features.py (stage 2).
+ 
+1. WHERE THE FILES ARE
+  - One cache file per SONG: Cache/Songs/<song dir with every "/" replaced by
+    "_">, NO extension. Example: song dir "Songs/MyPack/My Song/" ->
+    Cache/Songs/Songs_MyPack_My Song [CODE: SongCacheIndex::GetCacheFilePath,
+    Song::GetCacheFilePath]. Pack names containing "_" make the filename
+    ambiguous, so do not derive the pack from the filename.
+  - Cache/index.cache is a separate index (directory hashes); not needed. Also
+    Cache/Courses/ (courses, ignore) and image caches (ignore).
+  - Files exist only for songs the game has loaded with the cache enabled.
+    Whether a stale cache file for a deleted song stays on disk was not
+    checked [UNVERIFIED].
+ 
+2. FILE LAYOUT [CODE: NotesWriterSSC::Write, WriteGlobalTags, GetSSCNoteData]
+  Plain text, SSC tag syntax "#NAME:value;", values may span lines.
+  a) global tags: #VERSION #TITLE #SUBTITLE #ARTIST ... #GENRE #ORIGIN
+     #CREDIT #BANNER ... timing tags.
+  b) "// cache tags:" block: #FIRSTSECOND #LASTSECOND #SONGFILENAME #HASMUSIC
+     #HASBANNER #MUSICLENGTH, then "// end cache tags".
+  c) one block per chart: a comment line "//----...", then "#NOTEDATA:;" and
+     #CHARTNAME #STEPSTYPE #DESCRIPTION #CHARTSTYLE #DIFFICULTY #METER
+     [#MUSIC] #RADARVALUES #CREDIT [own timing tags] [#ATTACKS] [#DISPLAYBPM],
+     then "// step cache tags:" with #TECHCOUNTS #NPSPERMEASURE #NOTESPERMEASURE
+     #PEAKNPS #NOTEANNOTATIONS #GROOVESTATSHASH #GROOVESTATSHASHVERSION
+     #STEPFILENAME, then "// end step cache tags". There is no note data.
+  Pack name: #SONGFILENAME is song dir + file name (Song.cpp ~380), e.g.
+  "Songs/MyPack/My Song/song.sm"; the PACK is its 2nd path component
+  [INFERRED from the assignment; not seen in a real file]. For songs from
+  additional folders the path still reads "Songs/<pack>/..." (engine notes 7p).
+ 
+3. TAG FORMATS
+  - #METER: integer. #DIFFICULTY: Beginner|Easy|Medium|Hard|Challenge|Edit.
+  - #STEPSTYPE: e.g. dance-single, dance-double.
+  - #RADARVALUES: comma list, NUM_PLAYERS (2) x 14 floats = 28 values; the
+    loader splits the list evenly by player count, so read length/2 per
+    player. Order per player: Stream, Voltage, Air, Freeze, Chaos, Notes,
+    TapsAndHolds, Jumps, Holds, Mines, Hands, Rolls, Lifts, Fakes
+    [CODE: GameConstantsAndTypes.h enum]. -1 = unknown.
+  - #TECHCOUNTS: comma list, 2 x 10 floats, per player: Crossovers,
+    HalfCrossovers, FullCrossovers, Footswitches, UpFootswitches,
+    DownFootswitches, Sideswitches, Jacks, Brackets, Doublesteps
+    [CODE: TechCountsCategory.h]. Player 2 copies player 1 except couples/
+    routine charts (the fill is in Steps::CalculateTechCounts).
+  - #NPSPERMEASURE / #NOTESPERMEASURE: players separated by "|", measures by
+    ",". Usually one section only. Measures are 4-beat blocks (MeasureInfo.cpp).
+    NPS written with 3 decimals.
+  - #PEAKNPS: players separated by "|".
+  - A step type without a parity layout has all tech counts 0 (engine notes
+    section 8 of the difficulty notes file).
+4. PARSING NOTES [CODE for the writer; INFERRED for robustness]
+  - Strip comment lines starting "//" before tokenising. Values escape some
+    characters with a backslash (SmEscape, RageUtil.cpp ~434; "//" inside a
+    value is written "\/\/"). Split on a ';' that is not preceded by a
+    backslash.
+  - Titles may contain ':' or ';' (escaped). Read the first ':' as the tag
+    separator only.
+  - A chart with missing tags (older cache version) should be reported, not
+    silently dropped. FILE_CACHE_VERSION is 232 on v1.3.0 (Song.cpp:69); the
+    engine rewrites caches when it changes.
+ 
+5. #GROOVESTATSHASH / #GROOVESTATSHASHVERSION (read 2026-10-10)
+  [CODE: Steps::CalculateGrooveStatsHash Steps.cpp ~740-763,
+   MinimizedChartString ~765-843, NormalizeDecimal RageUtil.cpp ~323]
+  - Value = first 16 hex characters (64 bits) of SHA-1 over: the chart's SM
+    note string, minimized (a measure whose odd lines are all empty is halved
+    repeatedly, so padding/quantization does not change the hash), followed
+    by the BPM segments written "beat=bpm" (3 decimals) joined by commas.
+  - COVERED: note data for all tracks (so column count matters) and BPM
+    changes. NOT COVERED: stops, delays, warps, speed/scroll changes, song
+    offset, step-type name, difficulty, meter, description, credit.
+    Consequence [INFERRED]: two charts with identical notes and BPMs but
+    different stops or warps share a hash; identical charts with different
+    labels share a hash (that is how re-rated duplicates are found).
+  - Version: CURRENT_GROOVE_STATS_HASH_VERSION = 3 (Steps.h ~37). Hashes from
+    different versions are not comparable; the extractor groups only equal
+    versions.
+  - An empty chart hashes only its BPM string, so unrelated empty charts can
+    collide; the extractor marks them hash_status=empty_chart and never
+    groups them.
+  - Collision chance for 64 bits is negligible at library scale [INFERRED].
+  EXTRACTOR COLUMNS: groovestats_hash, groovestats_hash_version, hash_status
+  (ok | missing | malformed | empty_chart | no_version), dup_group (id, blank
+  if unique), dup_group_size, dup_packs (distinct packs in the group),
+  dup_meter_conflict (members carry different meters), dup_feature_mismatch
+  (members differ in peak NPS, notes or tech counts; catches the stop/warp
+  blind spot). hash_status is separate from "flags" so a missing hash never
+  drops a chart from fitting.

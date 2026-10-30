@@ -1,0 +1,212 @@
+ITGMANIA EDITOR: CLIPBOARD, UNDO/REDO, MOUSE WHEEL/ZOOM, MOUSE DRAG - WORKING NOTES (beta, NOT in v1.3.0)
+=========================================================================================================
+ 
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, complete for its topic (in-game checks only).
+  REVISION:      2026-10-11-a (header added; body unchanged from 2026-09-30)
+  VERSION BASIS: itgmania beta head 28e58a78c7; NOT in v1.3.0.
+  TOPIC KEY:     editor, ScreenEdit, clipboard, undo, redo, mouse wheel,
+                 ScrollSpeedPresets, mouse drag selection, Ctrl shortcuts
+  READ WHEN:     the task touches edit-mode shortcuts (Ctrl+Z/Y/X/C/V),
+                 undo/redo depth, clipboard, wheel scroll/zoom, or drag
+                 selection on beta.
+  SEE ALSO:      itgmania_editor_notes.txt (v1.3.0 editor; Part 2 section 3
+                 undo question is resolved here, section 3).
+ 
+Basis:    Source of itgmania/itgmania branch "beta", head 28e58a78c7
+          (author 2026-09-26, committer 2026-09-28), read 2026-09-30, plus
+          git log and the diffs of the commits below. v1.3.0 compared
+          where stated. Not built, not run. PR threads not read.
+Docs:     grep of Docs/ (see itgmania_editor_notes.txt) found no mention
+          of any feature below. The in-game edit help pane was edited by
+          these commits (see 2).
+Tags:     [CODE] read in source; [INFERRED] reasoned, not tested;
+          [UNVERIFIED] not determined.
+Author per git: "Crash Cringle" for all commits below, except where noted.
+All code is in src/ScreenEdit.cpp / ScreenEdit.h unless stated.
+ 
+1. Commits [CODE, git log]
+   f3f2e80e25 2026-08-22 Add full clipboard support to Edit Mode (also
+              introduces the multi-level undo/redo stacks)
+   9d6cab80d2 2026-08-22 Move clipboard stuff to CTRL+ key binds; change
+              Course Mods keybind
+   46787a8bc8 2026-08-22 Add Mouse Wheel Scrolling Support
+   43579c352a 2026-08-22 Mouse Dragging (area selection)
+   f4cae4cc60 2026-09-10 CTRL+Mouse Wheel controls zoom; new metrics
+   (Later edits to the same code by others: not searched.)
+ 
+2. Keyboard shortcuts (editing state) [CODE: InitEditMappings ~719-760,
+   dispatch ~4122-4140; DeviceToEdit ~861]
+   Ctrl+Z or Ctrl+U   Undo          (v1.3.0: plain "U", no Ctrl)
+   Ctrl+Y             Redo          (new)
+   Ctrl+X             Cut selection to clipboard   (new)
+   Ctrl+C             Copy selection to clipboard  (new)
+   Ctrl+V             Paste clipboard at current beat (new)
+   Shift added to Ctrl+X / C / V: the cut/copy/paste ALSO moves/copies/
+   pastes the TIMING segments in the selected range (see 4).
+   Either Ctrl key works (the hold list has both; DeviceToEdit accepts
+   any listed hold key). [CODE]
+   Ctrl+Z/U also bound in record-paused state. [CODE ~811-815]
+   Course-editing keys (only when editing a course; ~474-485): Ctrl+K now
+   opens the course playback menu; it was "V" alone in v1.3.0 (V moved
+   because Ctrl+V is now Paste). [CODE: v1.3.0 vs beta diff of
+   ~474-485; I did not read what enables that branch]
+   Help pane lines added: "Undo/Redo", "Cut selection to clipboard",
+   "Copy selection to clipboard", "Paste from clipboard". The Shift
+   (timing) variant is not mentioned in the lines I saw in the diff.
+   [CODE for those lines; whole help pane not re-read]
+   macOS [INFERRED]: Save uses Cmd on macOS, but the new bindings use
+   Ctrl, and ScreenEdit::Input returns false when either Cmd key is held,
+   so Cmd+C/V/X/Z would not work; Ctrl+... would. Not tested.
+   The old menu route still exists: Area menu has Cut/Copy/Paste at
+   current beat / at begin marker. The shortcuts call the same handlers
+   (HandleAlterMenuChoice(cut/copy), HandleAreaMenuChoice(
+   paste_at_current_beat)). [CODE]
+ 
+3. Undo and Redo [CODE: ScreenEdit.h ~407-415; SaveUndo/Undo/Redo]
+   - v1.3.0: one undo level, a single NoteData copy swapped on Undo.
+   - Beta: m_UndoStack and m_RedoStack, each entry = full NoteData copy
+     plus a text description; MAX_UNDO_STATES = 50 (oldest dropped).
+     SaveUndo(description) pushes and CLEARS the redo stack.
+     Undo/Redo show system messages "Undo - <description>" / "Redo -
+     <description>", or "Can't undo/redo - no ... data".
+   - Stacks are cleared in ScreenEdit::Init (ClearUndo), so history does
+     not survive leaving and re-entering the editor. [CODE]
+   - The undo state holds NOTE DATA ONLY. Timing changes (BPM, offset,
+     stops, "Apply Sync" from Adjust Sync, timing cut/paste in 4) are not
+     part of it. [CODE: UndoState has only m_NoteData and
+     m_sDescription] This RESOLVES the open point in
+     itgmania_editor_notes.txt Part 2 section 3 ("whether Undo covers
+     timing changes is UNVERIFIED"): it does not. Also: SaveUndo has
+     10 call sites (11 lines incl. the definition; the earlier note said
+     11 calls).
+   - Memory [INFERRED, arithmetic only]: up to 50 full copies of the
+     chart's note data per open editor, plus 50 in the redo stack.
+     Note data for typical charts is small; a very dense chart is a
+     larger multiple. Not measured.
+   - CheckNumberOfNotesAndUndo (notes past the end): now compares against
+     the top of the undo stack and drops the reverted state from the redo
+     stack so Redo cannot reapply the invalid state. [CODE]
+ 
+4. Clipboard [CODE: ScreenEdit.cpp ~7440-7560]
+   - Cut/Copy need a selected area (begin and end markers); otherwise the
+     message "Nothing selected - use Select an area first." and an
+     invalid sound. Paste on an empty clipboard: "Clipboard is empty -
+     nothing to paste."
+   - The clipboard (m_Clipboard, clipboardFullTiming, s_bClipboardHasTiming)
+     is now STATIC, so it persists between charts and between editor
+     sessions within one game run; copying from one chart and pasting into
+     another is the stated purpose (commit message). Not saved to disk.
+   - Init calls m_Clipboard.SetNumTracks(current chart's track count).
+     NoteData::SetNumTracks resizes the track vector: it does not clear
+     the notes, but a clipboard made from more tracks than the new chart
+     has would be truncated, and one from fewer gets empty extra tracks.
+     [CODE for SetNumTracks; INFERRED for the effect on pasting across
+     steps types; not tested]
+   - Timing variant (Shift): cut/copy copies the timing segments in the
+     range (TimingData::CopyRange, all segment types) from the
+     appropriate timing (song or step timing) into clipboardFullTiming;
+     cut also clears that range (ClearRange) and marks dirty. Paste
+     copies clipboardFullTiming into the appropriate timing at the current
+     row. Paste without Shift never pastes timing; Shift-paste pastes
+     timing only if the clipboard was made with Shift.
+     System messages differ ("... and timing ..."). [CODE]
+     The menu entry "Paste timing from clipboard" already existed.
+   - Undo does not restore timing (see 3). [INFERRED from 3]
+   - Cut is not wrapped in the Shift-timing SaveUndo: the note part goes
+     through HandleAlterMenuChoice(cut), which saves undo under the
+     menu's own name; the timing part is outside undo. [INFERRED; the
+     Alter-menu bSaveUndo condition for cut not re-read]
+ 
+5. Mouse wheel [CODE: ScreenEdit::Input ~2953-3025, Update ~2418,
+   ~3270-3290]
+   Only in the editing state and only when the wheel event is not mapped
+   to an edit button.
+   - Wheel: scrolls one "line" (same action as the keyboard line scroll).
+   - Shift+wheel: one page (4 beats).
+   - Ctrl+wheel: steps the notefield scroll speed through the presets
+     (same as Ctrl+Up/Down); this is what gives the "zoom" effect in the
+     editor (commit message). Plays the marker sound when the value
+     changes.
+   - Acceleration: consecutive wheel events within 0.5 s (hard-coded
+     SCROLL_ACCELERATION_RESET_TIME) ramp a multiplier:
+     1 + (n-1) x ScrollWheelAccelerationRate, capped at 8 (hard-coded
+     MAX_SCROLL_ACCELERATION_MULTIPLIER). Line scrolls move
+     beats x multiplier; Ctrl+wheel jumps round(multiplier) presets per
+     tick.
+   - The display "trailing beat" catches up faster when the multiplier
+     is above half the cap (4).
+   Theme metrics [ScreenEdit], defaults in _fallback/metrics.ini
+   ~4160-4165 [CODE]:
+     ScrollWheelAccelerationRate=0.1
+     ScrollSpeedApproachRate=10   how fast the displayed scroll speed
+                                  catches up to a new preset (applied to
+                                  the edit field's player options)
+     ScrollSpeedPresets="1.0,1.5,2.0,3.0,4.0,6.0,8.0,12.0"
+   Presets are parsed at Init; an empty or unparseable list falls back to
+   1,1.5,2,3,4,6,8 (note: no 12). InvertScrollSpeedButtons (existing
+   metric) also inverts the direction of Ctrl+wheel. [CODE]
+   Observations (not confirmed defects):
+   a) Stale multiplier [CODE for the assignments; INFERRED for the
+      effect]: m_fScrollAccelerationMultiplier is reset only inside the
+      wheel handler, on the next wheel event after more than 0.5 s. The
+      line-scroll code applies the multiplier to EDIT_BUTTON_SCROLL_UP/
+      DOWN_LINE regardless of whether the wheel or the keyboard produced
+      it. So after a fast wheel burst, keyboard line scrolling may move
+      several beats per press until the next wheel event, and the
+      trailing-beat catch-up may stay boosted. Not tested; see check 4.
+   b) Current speed not in the preset list [CODE]: the index search
+      leaves iSpeed at 0 when the current scroll speed equals no preset,
+      so the first step goes from the FIRST preset, not from the nearest.
+      Same pattern in the Ctrl+Up/Down code. [INFERRED: what a player
+      sees]
+   c) Modifier keys are read directly from the keyboard (Ctrl/Shift), not
+      through the edit mapping, so they cannot be remapped like other edit
+      keys. [CODE]
+ 
+6. Mouse drag selection [CODE: ScreenEdit::Input ~2933-2946, Update
+   ~2264, DrawPrimitives ~2809, FinishMouseDragSelection ~2826,
+   MouseYToBeat ~1824]
+   - Left button press in the editing state starts a drag; a translucent
+     blue rectangle (0.6,0.8,1.0 alpha 0.25) follows the cursor; release
+     sets the area selection markers (the same begin/end markers as the
+     keyboard "select area" and Shift+arrow methods).
+   - Only the vertical extent matters; screen Y is converted to beats
+     with the field's displayed (trailing) beat, so it matches what is
+     drawn while scrolling.
+   - Movement under 4 screen units vertically counts as a click and
+     CLEARS the selection (both markers set to -1).
+   - Normal drag: selection is tightened to the first and last note
+     rows inside the rectangle; if there are no notes inside, the
+     selection is cleared.
+   - Shift + drag: bounds are quantized to the current snap (e.g. 16ths)
+     instead of to notes, so empty regions can be selected.
+   - If start row >= end row after this, selection is cleared. Plays the
+     marker sound on success.
+   - The wheel is separate: scrolling during a drag is not handled
+     specially [UNVERIFIED for behavior; the rectangle uses fixed screen
+     coordinates].
+   - Any left click in the editing state (even one meant for the menu or
+     elsewhere on screen) starts a drag and returns true from Input
+     [CODE]; I did not check whether the edit screen has mouse-clickable
+     elements that this would shadow. [UNVERIFIED]
+   - Mouse coordinates are scaled from the window to theme coordinates
+     using display height and aspect ratio preferences (GetMouseScreenX/Y)
+     [CODE].
+ 
+7. In-game checks (I cannot run the game)
+   1. Ctrl+Z, Ctrl+U, Ctrl+Y; plain U no longer undoes. Do 3 note edits,
+      undo 3, redo 3, then edit and confirm Redo is cleared.
+   2. Undo after a Shift+Ctrl+X: notes return; timing does not.
+   3. Copy on one chart, paste on another chart of a different steps type
+      (4 vs 8 tracks).
+   4. Spin the wheel quickly, stop, then press Up/Down on the keyboard:
+      does it move more than one line? (observation 5a)
+   5. Ctrl+wheel with a scroll speed not in the presets (set an odd value
+      in edit options): where does the first step land? (5b)
+   6. Edit ScrollSpeedPresets / ScrollWheelAccelerationRate in a theme
+      and confirm they take effect; try an empty preset string.
+   7. Drag over empty space (no notes): selection cleared; with Shift:
+      selection made.
+   8. macOS: compare Cmd+C and Ctrl+C.
+   9. Course editing: Ctrl+K opens the playback menu; plain V does not.

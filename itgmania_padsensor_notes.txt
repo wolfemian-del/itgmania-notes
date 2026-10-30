@@ -1,0 +1,236 @@
+ITGMANIA PAD SENSOR STATE AND "SNEKCONFIG" INPUT DRIVER - WORKING NOTES (beta, NOT in v1.3.0)
+=============================================================================================
+ 
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, complete for its topic (hardware checks only).
+  REVISION:      2026-10-11-a (header added; body unchanged from 2026-10-02)
+  VERSION BASIS: itgmania beta head 28e58a78c7 (some items re-checked on
+                 c8e69b9ca8, 2026-10-01); NOT in v1.3.0.
+  TOPIC KEY:     pad sensors, InputFilter, GetFullSensorState, SnekConfig,
+                 PumpHID, InputDrivers preference, HidDevice, snek
+  READ WHEN:     the task touches sensor test data, input driver
+                 selection (InputDrivers), snek/PumpHID hardware, or
+                 HidDevice.
+  SEE ALSO:      misc notes 2 (BrokeIO lights, also uses HidDevice).
+ 
+Basis:    Source of itgmania/itgmania branch "beta", head 28e58a78c7
+          (author 2026-09-26, committer 2026-09-28), read 2026-09-30,
+          plus git log. Simply Love at dd06138 (the commit beta pins).
+Not done: I did not build or run anything, have no snek / PumpHID
+          hardware, did not read PR threads, and did not read the
+          HidDevice implementation or the snek firmware protocol beyond
+          what the driver code shows.
+Docs:     Lua API is documented (Docs/Luadoc/LuaDocumentation.xml, "since
+          ITGmania 1.4.0"): INPUTFILTER:GetFullSensorState(),
+          INPUTMAN:StartSensorTest(), INPUTMAN:StopSensorTest(). Enum
+          PadSensor is in Lua.xml. NOT documented anywhere I looked
+          (Docs/, grep): the SnekConfig driver, how to enable it, the
+          udev requirement (only in a header comment), the PumpHID driver,
+          or what the sensor data means.
+Tags:     [CODE] read in source; [INFERRED] reasoned, not tested;
+          [UNVERIFIED] not determined.
+Author per git: "din" for all commits below.
+ 
+1. Commits [CODE, git log]
+   33b2da866f 2026-08-23 add debug sensor state to InputFilter for
+              supported devices (InputFilter, RageInput, ScreenTestInput,
+              PumpHID)
+   02fb985460 2026-08-23 PadSensorState change (msvc)
+   929422c47f 2026-08-24 add new PadSensors
+   b6284cdec4 2026-08-24 removed center; PadSensorState gets max/min/
+              threshold; binary helpers
+   a6a37fd19b 2026-08-24 additional lua docs
+   cfcdf296d0 2026-08-24 reduce PadSensor count
+   ffcef8bdd1 2026-08-29 add snekconfig for sensor debugging
+   8156743e96 / 3842827292 2026-08-29 msvc fix; check snek cmd validity,
+              thread safety with std methods
+   1268c2a148 2026-09-10 change unique_ptr to member variables
+   (The snek LIGHTS driver, LightsDriver_snek, is separate and older; not
+    covered here.)
+ 
+2. What the feature is
+   A debug/diagnostic view of per-panel sensor readings on a dance or
+   pump pad, so a test screen or theme can show WHICH sensor on a panel
+   is triggering. The engine keeps a table [player][panel][sensor] in
+   InputFilter and fills it from drivers that supply it. [CODE]
+   Panels (PadPanel): UpLeft, Up, UpRight, Left, Center, Right, DownLeft,
+   Down, DownRight. Sensors (PadSensor): TopCenter, TopLeft, TopRight,
+   RightCenter, BottomCenter, BottomLeft, BottomRight, LeftCenter.
+   [CODE: InputFilter.h, PadSensorNames in InputFilter.cpp]
+   Values: internally unsigned ints clamped to min..max (default 0..100);
+   Lua gets float (value-min)/(max-min), i.e. 0.0 to 1.0. [CODE]
+   In practice both drivers only write BINARY values (0 or max), so Lua
+   sees 0.0 or 1.0, never a graded pressure. [CODE: only
+   setFullSensorStateBinary has callers]
+ 
+3. Lua API [CODE: InputFilter.cpp LunaInputFilter, RageInput.cpp]
+   INPUTFILTER:GetFullSensorState()
+     Returns a table keyed by the PlayerNumberToString value of each
+     player, then by panel name (e.g. "UpLeft"), then by sensor name
+     (e.g. "TopCenter"), holding a float. Built fresh each call.
+     Note: the docs say "a table of NUM_PLAYERS"; the code fills named
+     fields, not array indices. Docs/code wording mismatch (observation);
+     player keys are "P1" and "P2" (PlayerNumberNames in
+     PlayerNumber.cpp; table created with an array-size hint of NUM_PLAYERS
+     but filled by name) [CODE, resolved 2026-10-01 on beta c8e69b9ca8].
+   INPUTMAN:StartSensorTest() / StopSensorTest()
+     Call StartSensorDebugging()/StopSensorDebugging() on EVERY loaded
+     input handler. Base class implementations do nothing; only
+     SnekConfig overrides them. No reference count.
+   Engine callers: ScreenTestInput::BeginScreen starts, EndScreen stops.
+   So the built-in test-input screen turns polling on. [CODE]
+   Theme use: no hit for GetFullSensorState, PadSensor or
+   TestSensorRedrawEvent in Themes/ (_fallback) or Simply Love dd06138.
+   No shipped theme displays the data. [CODE, grep]
+   Message: SnekConfig broadcasts "TestSensorRedrawEvent" whenever a
+   polled sensor word changes, so a theme could redraw on it. It is not
+   documented and PumpHID does not send it. [CODE]
+ 
+4. Enabling the drivers [CODE]
+   Neither PumpHID nor SnekConfig is in the default input driver lists
+   (arch_default.h: Windows "DirectInput, Pump, Para"; macOS "HID,
+   NSEvent"; the Linux list was not read). They load only if named in the
+   InputDrivers preference (Preferences.ini), comma-separated; unknown
+   names are skipped with a Trace log. [CODE: InputHandler::Create,
+   RageInput.cpp g_sInputDrivers]. The exact InputDrivers string is
+   [UNVERIFIED] beyond the class names "PumpHID" and "SnekConfig"
+   (REGISTER_INPUT_HANDLER_CLASS).
+   RESOLVED 2026-09-30 (Linux list + exact names) [CODE:
+   src/arch/arch_default.h, InputHandler.cpp Create, RageDriver.cpp,
+   CMakeData-arch.cmake]:
+     Linux default = "X11", "LinuxEvent", "LinuxJoystick" (non-Linux Unix:
+     "X11" only). Neither PumpHID nor SnekConfig is in it, so the
+     statement holds for Windows, macOS and Linux.
+     Names are the registered class names "PumpHID" and "SnekConfig",
+     matched CASE-INSENSITIVELY (istring map). Preference InputDrivers is
+     a comma-separated list, e.g. "DirectInput,Pump,Para,SnekConfig"
+     [INFERRED example: split on ',' as in Create]. An EMPTY value means
+     "use the platform default list"; a NON-empty value REPLACES the whole
+     default list (it is not additive), so the default drivers must be
+     re-listed or normal keyboard/joystick input is lost. [CODE]
+     InputHandler_MonkeyKeyboard is always added.
+     Both PumpHID and SnekConfig are compiled on ALL platforms (listed in
+     the unconditional part of CMakeData-arch.cmake). [CODE]
+   SnekConfig header comment: needs user read/write access to the device;
+   suggests a udev rule for vendor 2e8a, product 10a8 (Linux). Config is
+   USB HID interface 1. [CODE]
+ 
+5. SnekConfig driver (src/arch/InputHandler/InputHandler_SnekConfig.*)
+   [CODE unless noted]
+   - Purpose: talk to the icedragon.io "snek" board's config HID
+     endpoint to read the EXTIO sensor bits. It reports NO devices
+     (GetDevicesAndDescriptions is empty) and creates no button input;
+     normal pad input still comes through the board's gamepad endpoint.
+   - Constructor: if the device is connected, sends GETINFO and logs
+     "Found snek version: ..."; otherwise logs "SnekConfig enabled, but
+     could not connect to snek."
+   - Polling only runs between StartSensorDebugging and
+     StopSensorDebugging, in a thread ("SnekConfig debug thread").
+   - The thread cycles through 4 sensor queries (SET_EXTIO_SENSOR with
+     payload 1..4). Each response holds a 32-bit word; bits 14-21 are
+     mapped to dance panels Up/Left/Down/Right for P1/P2 (table
+     sensorBitMappingDance). Sensor index 0..3 = TopCenter, BottomCenter,
+     LeftCenter, RightCenter. Only DANCE panels are mapped; there is no
+     pump mapping.
+   - Packets: 64 bytes, report id 0x77 out / 0x78 in, opcode byte, one
+     payload byte, last byte = 8-bit sum of bytes 0-62 (additive
+     checksum, called CRC in the code). Replies are checked for size,
+     report id, error opcode 0xFF, and matching opcode.
+   - The code comment says that while sensor debugging is on, the snek
+     will not send events over the gamepad endpoint (the answer comes via
+     the config endpoint). [CODE comment; hardware behavior UNVERIFIED]
+     Consequence [INFERRED]: on the test-input screen, with SnekConfig
+     loaded and a snek connected, normal pad presses from that board may
+     not appear until the screen exits; not tested.
+   - On stop, the thread and the destructor send SET_EXTIO_SENSOR with
+     payload 0 and then a DISCONNECT opcode (so the cleanup can run
+     twice). The meaning of payload 0 is [INFERRED] as "leave sensor
+     mode".
+ 
+6. PumpHID sensor data [CODE: InputHandler_PumpHID.cpp]
+   - PumpHID (existing driver) now also fills the sensor table. It does
+     NOT override Start/StopSensorDebugging, so it updates the table
+     whenever the polled report's sensor bytes change, whether or not a
+     sensor test is running. (The InputHandler.h comment about "extra
+     overhead" therefore does not apply to it.)
+   - 4 sensors per panel are used: index 0 Right, 1 Left, 2 Bottom,
+     3 Top (all "Center" variants). The four corner sensor values
+     (TopLeft, TopRight, BottomLeft, BottomRight) are never set by any
+     driver, so they always read 0.0. [CODE: only the four *Center
+     names appear in the two drivers]
+   - Panel mapping depends on the current game (dance vs pump), read
+     each time. Buttons are active-low, so the code inverts them.
+   - Threaded input only starts if the Threaded Input preference is on
+     (m_bThreadedInput) and the device is connected. [CODE]
+ 
+7. Observations (not confirmed defects)
+   a) Thread safety [INFERRED]: setFullSensorState* is called from driver
+      threads and GetFullSensorState reads from the Lua/main thread. I saw
+      no mutex around InputFilter::m_Sensors. Reads of single unsigned
+      ints are unlikely to be visibly wrong, but a table read mid-update
+      could mix old and new panel values. Not tested.
+   b) Busy loop on error [INFERRED]: in the snek polling loop, a failed
+      SendCommand does `continue` with no sleep, so a disconnected or
+      misbehaving board could spin the thread and repeat "could not send"
+      / "could not read" warnings in Log.txt. HidDevice may block or
+      auto-reconnect (constructed with auto-reconnect true); its behavior
+      was not read.
+   c) Divide-by-zero guard [INFERRED]: GetIntensity divides by (max-min).
+      SetMax/SetMinMax could make that zero, but nothing calls them
+      (setFullSensorStateMax has no callers), so not reachable today.
+   d) Unused API: threshold storage (SetThreshold, isAboveThreshold) and
+      setFullSensorState (non-binary) have no callers. Presumably for
+      later analog devices [UNVERIFIED].
+   e) Pre-existing, not part of this feature: PumpHID drives the P2
+      center MENU lamp from controller 1's Start light state
+      (menu_p2_cn uses GameController_1). Same line in v1.3.0; blame says
+      din, 2025-07-20. Could be intentional; the source has a TODO about
+      menu buttons nearby.
+ 
+7f. RESOLVED / TIGHTENED 2026-10-01 (beta c8e69b9ca8) [CODE unless noted]
+   a') No lock: InputFilter::setFullSensorState/Binary/Max and
+      getFullSensorState/GetFullSensorState (InputFilter.cpp ~482-505, ~540)
+      do not take queuemutex, which other InputFilter methods use.
+      PadSensorState (InputFilter.h ~82) is plain unsigned int arrays, not
+      atomics. A Lua read can interleave with a driver-thread write; in
+      C++ terms a data race [INFERRED: practical effect small, not tested].
+   b') Snek poll loop on failure: InputThreadMain does `continue` with no
+      sleep when SendCommand fails. HidDevice (autoReconnection=true,
+      nonBlockingRead=false, set in InputHandler_SnekConfig.h) closes its
+      handle after any failed read/write. The next Write then calls
+      CheckConnection -> TryConnect -> GetDeviceInfo -> hid_enumerate(vid)
+      every pass; when no device with the vendor id is present it logs
+      "HidDevice with vid ... not found, is it plugged in?", and SendCommand
+      logs "snek could not send". So an unplug during the sensor test gives
+      a tight loop: one enumeration and two warnings per pass. Pass rate
+      depends on hid_enumerate cost [UNVERIFIED]. The thread stops on
+      StopSensorDebugging (m_bShutdown, atomic).
+   c') Blocking read: reads are blocking (nonBlockingRead=false). If the
+      board accepts the write but never answers, hid_read would wait; that
+      would also stall StopSensorDebugging's DebugThread->Wait().
+      [INFERRED from hidapi semantics; hidapi source not read; not tested]
+   d') Leak: HidDevice::GetDeviceInfo (src/archutils/Common/HidDevice.cpp)
+      calls hid_enumerate and never hid_free_enumeration (grep: 0 hits).
+      foundDeviceInfo.path points into that list, so a naive free would
+      leave it dangling; the leak looks like a workaround or oversight
+      [UNVERIFIED which]. Leak size = one enumeration list per call that
+      finds at least one device with the vendor id. The file exists in
+      v1.3.0 (merge-base check) [CODE]. PumpHID and BrokeIO use the same
+      class, so the same applies to them.
+ 
+8. In-game / hardware checks (I cannot run any of this)
+   1. Add SnekConfig to InputDrivers, start with a snek connected: Log.txt
+      should show "Found snek version: ...".
+   2. Open Test Input: with a snek, check whether gamepad presses still
+      register while the screen is open (see section 5 comment).
+   3. Print INPUTFILTER:GetFullSensorState() from a test Lua screen while
+      stepping on one panel: which sensor names go to 1.0? Compare
+      with the physical sensor layout.
+   4. With PumpHID: confirm corner sensors stay 0 and that the values
+      change even outside the test screen.
+   5. Unplug the snek during the test screen and watch Log.txt/CPU for a
+      warning flood (observation 7b).
+   6. Confirm no theme redraw happens on PumpHID (no TestSensorRedrawEvent).
+   7. [DONE by code reading 2026-09-30] Linux default list has neither
+      driver. In-game: put SnekConfig alone in InputDrivers and confirm
+      keyboard input stops working (replace-not-add behaviour).

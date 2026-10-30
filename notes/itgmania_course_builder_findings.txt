@@ -1,0 +1,543 @@
+ITGMANIA COURSE BUILDER (COURSES FROM MODELED DIFFICULTY) - FINDINGS
+REVISION: 2026-10-28-i | file: notes/itgmania_course_builder_findings.txt
+
+FILE STATUS
+  Status:     ACTIVE. Script and GUI written and mock-tested; NOT run on the user's real cache; no .crs loaded in game.
+  Basis:      engine v1.3.0 8a3bf8884a (src/CourseLoaderCRS.cpp, Course.cpp, Difficulty.cpp, Song.cpp, MsdFile.cpp,
+              SongManager.cpp read 2026-10-24); deployed model claude/difficulty_model_notech.json
+  Topic key:  course
+  Read when:  building or debugging .crs files made from modeled ratings; Course file syntax questions
+  See also:   engine:3, display (same model, same cache data), msort (same Unrated rules), writeup (model limits)
+  Tags:       [CODE] read in source  [INFERRED] reasoned, not tested  [TESTED] run by Claude on mock data
+              [UNVERIFIED] not determined. Claude cannot run the game.
+
+1. ANSWER
+  Yes. tools/difficulty/make_course_by_rating.py reads Cache/Songs, rates every dance-single non-Edit chart with the
+  deployed model (same formula as DifficultyModel.lua), and writes a .crs of fixed #SONG entries, e.g. 10 charts
+  all modeled 11:
+     python make_course_by_rating.py CACHE --rating 11 --count 10 --out "Courses/Modeled/Eleven.crs"
+  Other modes: --range 10-12, --ratings 9,10,11,12 (ladder, order kept), --sort asc|desc, --histogram (charts per
+  modeled rating, no file written), --seed, pack include/exclude files, --root (drop cache entries whose song folder
+  is gone), --min-seconds/--max-seconds, --max-per-pack, --lives, --no-pin.
+  Files needed side by side: make_course_by_rating.py, extract_chart_features.py (imported for parsing),
+  difficulty_model_notech.json (default --model path is the script's own folder).
+  GUI front end (section 9): make_course_gui.py, same folder, same three dependencies.
+  Output goes wherever --out says; to be seen in game it must be under the game's Courses/<group>/ folder.
+
+2. WHY A SCRIPT AND NOT A COURSE FEATURE  [CODE]
+  - A fixed #SONG entry's third field is a Difficulty slot name OR a meter range "lo..hi"; the range is compared
+    with the chart's official METER, not the modeled rating (CourseLoaderCRS.cpp ParseCourseSong; the %d..%d branch).
+    So a course cannot ask for "modeled 11" by itself. The script resolves the chart outside the game and writes the
+    slot (Beginner/Easy/Medium/Hard/Challenge) of the chart that has the wanted modeled rating.
+  - #SONGSELECT has METER=lo-hi too (also official meter).
+
+3. .CRS SYNTAX THE SCRIPT WRITES  [CODE unless noted]
+    #COURSE:<title>;            title may not contain : ; # (see 5.3)
+    #SCRIPTER:<text>;           optional
+    #DESCRIPTION:<text>;
+    #LIVES:<n>;                 optional (--lives). Any n > 0 makes the course an ONI course (section 10.2); leave it
+                                out (the default) for a NONSTOP course
+    #STYLE:single;              optional (--style). CORRECTION 2026-10-25: earlier revisions said this is parsed.
+                                It is NOT reached in v1.3.0 (section 10.3), so it has no effect; off by default
+    #SONG:<Pack>/<SongFolder>:<Slot>:<mods>;
+  - <Pack>/<SongFolder> is split on "/" ("\" is converted first); exactly 2 parts are looked up with
+    SONGMAN->FindSong(group, name). Song::Matches compares the group case-insensitively with m_sGroupName and the
+    name with m_sSongName (= the song folder name, Song.cpp:289) or the translit full title. The script writes
+    pack and folder names taken from #SONGFILENAME ("Songs/<pack>/<song>/file").
+  - Slot tokens: OldStyleStringToDifficulty maps beginner, easy, medium, hard, challenge to the five slots
+    (Difficulty.cpp:55-77). TRAP: the old-style word "difficult" maps to MEDIUM, not Hard. The script never writes it.
+  - Fourth field (mods): the script writes "nodifficult" (default) or an empty field (--no-pin). Missing fields read
+    as empty strings (MsdFile value_t operator[]), but the script always writes four fields.
+  - "nodifficult" matters: for course difficulties other than Medium (Regular), Course.cpp (about line 646) changes the
+    chart to slot dc + (courseDifficulty - Medium), clamped to Beginner..Challenge, if that slot exists, unless the
+    entry has bNoDifficult. Without the pin, a Hard/Challenge trail would swap in neighbouring-slot charts whose
+    modeled rating is not the one asked for. Whether the Simply Love theme lets the player pick other course
+    difficulties [UNVERIFIED]; the pin costs nothing.
+
+4. HOW THE SCRIPT RATES AND CHOOSES
+  4.1 Rating [CODE for the model, TESTED for parity]
+    raw = intercept + sum(coef*feature); cal = linear interpolation over the 47 knots (flat outside);
+    rating = clamp(floor(cal+0.5), 1, 19). Coefficients and knots are read from the JSON at full precision.
+    Features come from extract_chart_features.process_file (so parsing is identical to the fitted pipeline) plus the
+    derived ones (log_rows, active_frac, mines/holds/jumps per row, hands per row with coefficient 0).
+    Parity test [TESTED 2026-10-24, mock cache of 240 files, 762 rated charts]: ratings equal to a numpy/pandas
+    reference built from fit_difficulty_model.build_features and apply_model.rate logic in 762/762 charts, calibrated
+    values equal to 1e-12. The reference was re-typed from those two files for the test, and the test used a stub
+    holding verbatim copies of the extractor functions the script calls (not the full project file).
+    Half-up rounding here matches the Lua; apply_model.py uses the same floor(x+0.5).
+  4.2 Which charts are eligible
+    dance-single, difficulty slot Beginner..Challenge (Edit excluded), no extractor flags (missing tags, unknown
+    radar), song path of the form Songs/<pack>/<song>/..., no ':' ';' '#' in pack or folder name, passes pack
+    include/exclude lists, song folder exists when --root is given, passes length filter, and (default) not a
+    GrooveStats-hash duplicate of a chart already seen (first in sorted cache-file order is kept).
+    Non-dance-single, Edit and data-less charts are unrated, same rule as the in-game display (display, msort).
+  4.3 Picking
+    For each entry: take charts in the wanted rating range, never reuse a song (unless --allow-same-song), respect
+    --max-per-pack; choose a song uniformly among eligible SONGS first, then a chart of that song, so songs with
+    two charts at that rating are not favoured. Fails with a message (no file written) if the pool runs out.
+    --seed makes the pick repeatable [TESTED: identical entries for the same seed].
+    --sort asc/desc orders by the unrounded calibrated value; --ratings keeps the order given.
+
+5. CAVEATS
+  5.1 Model limits (writeup): ratings 18-19 are least reliable; Beginner/Easy slot-convention charts are weak; the
+      model was trained on DDR-style charts. A "modeled 11" course is "the model says 11", not an official 11.
+  5.2 Stale cache entries: the cache keeps entries for deleted songs/packs (user-confirmed earlier). Use --root so
+      those are not chosen. Without --root, entries for songs that are not loaded are dropped by the game on load
+      (below), shortening the course.
+  5.3 Names with ':' ';' '#': the course reader parses #SONG with unescape off, so a backslash escape stays in the
+      parameter and the name would no longer match [CODE: MsdFile.cpp ReadBuf, bUnescape false keeps '\'; the
+      mismatch itself is INFERRED]. The script therefore skips such songs and counts them ("':;#' in name").
+      Titles with those characters are refused for the same reason.
+  5.4 Missing songs at load time: a #SONG whose song is not found is skipped and the course is marked incomplete
+      (CourseLoaderCRS.cpp ParseCourseSong returns false; LoadFromMsd sets m_bIncomplete). Packs turned off by the
+      toggle patch (DisabledGroups) are not loaded, so a fixed-song course that uses them shrinks. Regenerate the
+      course after changing the pack set.
+  5.5 Course cache and FastLoad [CODE read, effect INFERRED, not tested]: LoadFromCRSFile uses the cached course file
+      when it exists and either FastLoad is on or the .crs hash matches. With FastLoad on and the same file path, an
+      overwritten .crs may keep showing the old contents until its cache entry is removed (Cache/Courses/...) or
+      a new file name is used. Safest: new file name per version, or delete the course's cache file.
+  5.6 Steps type: entries select the chart by difficulty slot for the played steps type. The script only picks
+      dance-single charts, so the course is for singles; in doubles the slot may not exist [INFERRED].
+  5.6b [OBSERVED in the user's first GUI build, one sample, not analysed] Of ten entries modeled 12, the official
+      meters were 12, 11, 7, 12, 11, 7, 9, 9, 12, 9. The 7s were from a stamina pack (Beginner/Easy slots) and the
+      9s from DWI packs and a Speirmix pack. Likely cause [INFERRED, not checked against the features]: the model
+      uses log of total rows and sustained-NPS windows, so long or dense charts with low official meters rate
+      high; stamina and DWI packs are outside the DDR-style training data (writeup). Mitigations the tool already
+      has: the Official column in the preview, the pack include list, min/max seconds, max per pack.
+  5.7 Numbers shown in the song/course UI are the official meters, so a "modeled 11" course may display mixed
+      official meters (the script prints each entry's official label next to its modeled value).
+  5.8 Windows: the script writes UTF-8 with LF line endings; the engine's MSD reader does not need CRLF [INFERRED].
+      Non-ASCII pack/song names are written as UTF-8, as they appear in the cache [UNVERIFIED in game].
+
+6. TESTS DONE / NOT DONE
+  Done on a synthetic cache (240 files, 6 packs, mixed slots and steps types, one name with ':'):
+    --histogram; --rating with --sort asc; --ratings ladder with --no-pin/--lives/--style; seed repeatability;
+    too-few-charts error (no file written); --root filtering (dropped entries with missing folders, kept those present);
+    bad title refusal; parity against the reference (4.1).
+  Not done by Claude: run on the real cache (the user ran the GUI scan on 35,290 charts, ~30 s, see 9.8); loading a produced .crs in the game; Windows paths.
+    The extractor parses ~5,500 files per run in the user's earlier use; this script re-parses the cache each run.
+
+7. IN-GAME CHECKS FOR THE USER
+  C1. Run --histogram on the real cache; confirm the per-rating counts look plausible against DifficultyModelCheck
+      output in game (a known song's rating from apply_model.py --lookup should match what the script prints).
+  C2. Build a course (--rating 11 --count 10 --seed 1) into Courses/Modeled/, restart or reload courses, and confirm
+      it appears with 10 songs and no "incomplete" hiding.
+  C3. In the course, check two entries with the modeled-rating display patch on (display notes) show 11.
+  C4. Check the log (Logs/log.txt) for "Course file ... does not exist" lines: any means a name did not resolve.
+  C5. Overwrite the same .crs with a different --seed and see whether the game shows the new list (5.5).
+  C6. Try a pack with a toggle-disabled pack in the course (5.4) to see the shortened/incomplete behaviour.
+
+8. OPEN / NEXT
+  - Run on the real cache and report: histogram, any failures, entries that fail to resolve in game.
+  - GUI: try it on Windows and report layout/dialog problems (9.8).
+  - Optional features not built: write several courses at once (one per rating 8-16); skip songs played recently
+    using Stats.xml; weight picks by song length; songs by group (#SONGSELECT form, would not need fixed picks but
+    cannot use the modeled rating); trail with attacks/mods.
+  - Optional: have the script read the model from DifficultyModel.lua if the JSON is not at hand.
+  - If the model is ever refit, replace difficulty_model_notech.json and re-run; no script change is needed unless
+    tech features are re-enabled (script refuses a model with tech_features true).
+
+9. GUI (make_course_gui.py, added 2026-10-25)
+  9.1 What it is: a tkinter window over the same code (it imports make_course_by_rating, so rating, picking and the
+      .crs writer are the CLI's own functions, not copies). Standard library only. tkinter ships with the python.org
+      Windows installer; on Linux it may need the python3-tk package.
+  9.2 Refactor it needed: make_course_by_rating.load_library was split into scan_library (parse the cache once, rate
+      every eligible chart, optional progress callback and stop flag) and filter_library (pack, game-folder,
+      length and duplicate filters applied in memory). load_library now calls both, so the CLI is unchanged
+      [TESTED: same seed gives the same .crs as before the split]. The GUI scans once and re-filters instantly.
+  9.3 Use: set Cache folder, Model file (defaults to the JSON beside the script), optional Game folder (enables the
+      --root existence check) and Courses folder; Scan library (runs in a background thread with a progress bar).
+      Left side: charts/songs per modeled rating (click a row to target it) and a pack list (click to include or
+      exclude; All/None). Right side: One rating / Rating range / Ladder, song count, order (random, easy to hard,
+      hard to easy), title, scripter, lives, min/max seconds, max per pack, seed, and the pin / same-song /
+      keep-duplicates checkboxes. Build / re-roll fills the preview; select rows to Replace (another chart at the
+      same wanted rating, other entries' songs excluded) or Remove; Save .crs writes the file.
+  9.4 Seed: blank means a fresh random seed each build; the seed used is shown in the status bar and a typed seed
+      reproduces the pick [TESTED: GUI with seed 3 produced the same ten entries as the CLI with --seed 3].
+  9.5 Settings: remembered in make_course_gui_settings.json next to the script (paths, options, and which packs were
+      unchecked). If that folder is read-only the settings are silently not kept.
+  9.6 Save checks: title and scripter may not contain : ; # (message shown); the file name is chosen in a save
+      dialog (default = title); overwriting asks via the system dialog only (the FastLoad stale-course warning of
+      5.5 is shown in the status bar after saving, not before).
+  9.7 Tested [TESTED 2026-10-25, Linux, Python 3.12, tkinter 8.6, Xvfb, synthetic cache of 240 files]: scan with
+      progress; histogram; clicking a rating sets the rating and title; build with sort; replace selected (changed
+      exactly the selected rows, ratings kept); remove; pack exclusion; ladder; too-few-charts warning; save; settings
+      round trip (restart restored mode, ladder, seed and paths). A screenshot showed the layout intact at 1180x760.
+  9.8 [OBSERVED by the user 2026-10-25] The GUI scanned the user's real cache, 35,290 charts, in about 30 seconds
+      (user's estimate), judged a non-issue because the scan happens once per session. So the GUI runs on the real
+      library at least as far as the scan.
+      [OBSERVED by the user 2026-10-25, Windows 11 x64, with a screenshot] The window looks and performs as
+      expected: layout intact at a high-DPI size, Japanese titles render, pack names with [year] prefixes and the
+      check glyphs show, and a Build with range 12-12, 10 songs, sort easy-to-hard produced 10 entries from 22,331
+      candidate charts (the 35,290 cache charts minus the non-rated and duplicate ones; Game folder left blank, so no
+      existence filter) in seed 86159754. Save, loading in game and the file dialogs were not reported.
+      NOT tested: very small screens, keyboard-only use, saving/loading a course in game. The pack list is a
+      Treeview with a check glyph; the glyph depends on the system font [UNVERIFIED on Windows].
+  9.9 In-game checks: the same as section 7; additionally G1: save a course from the GUI and from the CLI with the
+      same seed and compare the two files (should be identical except the title if names differ).
+
+10. COURSE FILE PARAMETER REFERENCE AND FAIL BEHAVIOUR (added 2026-10-25; engine v1.3.0, [CODE] unless noted)
+  10.1 Tags the loader reads (CourseLoaderCRS.cpp LoadFromMsd). Tag names are case-insensitive.
+    #COURSE:title;  #COURSETRANSLIT:text;  #SCRIPTER:text;  #DESCRIPTION:text;
+    #REPEAT:yes;    any value containing "yes" makes the course ENDLESS
+    #BANNER:path;   #BACKGROUND:path;   (if no #BANNER, a png/jpg/jpeg/bmp/gif named like the .crs is used)
+    #LIVES:n;       integer, negative values become 0
+    #GAINSECONDS:s; float; copied to each #SONG that FOLLOWS it in the file (a first entry with gain > 0, and no
+                    #LIVES, makes the course SURVIVAL)
+    #METER:n;       (2 fields) custom displayed meter for the Regular course difficulty
+    #METER:Difficulty:n;   (3 fields) custom displayed meter for Beginner/Easy/Regular/Difficult/Challenge/Edit
+    #MODS:TIME=s:LEN=s:END=s:MODS=...;   timed attack(s) attached to the NEXT #SONG/#SONGSELECT (attacks are
+                    cleared after each entry); several TIME/LEN/MODS groups may follow one another in one #MODS
+    #SONG:spec:difficulty:mods;          fixed or generated entry (10.4)
+    #SONGSELECT:KEY=value:KEY=value...;  criteria-based entry (10.5)
+    Not usable: #STYLE and the cache-only #RADAR lines (10.3). #DISPLAYCOURSE, #COMBO, #COMBOMODE are meant to be
+    ignored. Titles/paths cannot contain : ; # (they cannot be escaped, section 5.3).
+  10.2 Course type is derived, not stored (Course::GetCourseType): REPEAT -> ENDLESS; else #LIVES > 0 -> ONI; else
+    first entry has #GAINSECONDS > 0 -> SURVIVAL; else NONSTOP. Course::m_iLives is documented in the header as
+    "-1 means use bar life meter". Searching src/*.cpp and *.h, m_iLives is read only by GetCourseType, the writer and
+    CourseUtil, so the NUMBER in #LIVES does not itself set the battery lives; the battery count comes from the
+    player's battery-lives option (LifeMeterBattery reads m_BatteryLives from PlayerOptions). What a theme does for
+    PLAY_MODE_ONI [UNVERIFIED, not read]. Lua not searched.
+    CORRECTION 2026-10-28 (see 12.15): the paragraph above is wrong. m_iLives IS read in
+    ScreenSelectMusic::MenuStart (ScreenSelectMusic.cpp 1317-1325): when a course with m_iLives != -1 is chosen, it
+    assigns LifeType_Battery and m_BatteryLives = m_iLives at the Stage level for every enabled player. The earlier
+    search missed it because the output was cut off by head. So #LIVES:n makes a battery course with n lives, at least
+    when started from the music wheel; other entry paths (Lua, other screens) [UNVERIFIED].
+  10.3 OBSERVATION (possible bug, not confirmed in game): in LoadFromMsd the chain
+      else if (!EqualsNoCase(name,"DISPLAYCOURSE") || !EqualsNoCase(name,"COMBO") || !EqualsNoCase(name,"COMBOMODE"))
+      { /* Ignore */ }
+    is true for every tag name (a name cannot equal all three), so it swallows every tag that was not matched
+    earlier. The branches after it ("bFromCache && RADAR", #STYLE, and the "unexpected value" log line) can never run.
+    Consequences: #STYLE in a .crs is ignored (m_setStyles stays empty; Course::GetCourseStyle then returns null),
+    typos in tag names are never logged, and cached #RADAR lines are not read back [INFERRED: the course then
+    recalculates radar values on load]. Authors probably intended && instead of ||. Check on beta: not done.
+  10.4 #SONG fields (ParseCourseSong), split on ':'
+    field 1 (what song):  Pack/SongFolder (or bare SongFolder or title, searched in all packs)
+                          *                 random song from the whole library
+                          Pack/*            random song inside that pack (pack must exist, else the entry is skipped)
+                          BEST<n> / WORST<n>              n-th most / least played song
+                          GRADEBEST<n> / GRADEWORST<n>    n-th best / worst grades
+                          ("*" and "Pack/*" entries are "secret" (hidden title) unless the mods field says
+                          showcourse; the BEST/WORST/GRADE* branches do not set the secret flag in this loader.)
+    field 2 (which chart): a difficulty word (beginner, easy, medium, hard, challenge, edit, plus old-style synonyms:
+                          basic/light = Easy; another/trick/standard/difficult = Medium; ssr/maniac/heavy = Hard;
+                          smaniac/expert/oni = Challenge), OR an official-meter range "lo..hi" or a single "n".
+                          Invalid text falls back to 3..6 with a log line.
+    field 3 (mods, comma separated): showcourse, noshowcourse, nodifficult, award<N> (lives gained on clearing the
+                          entry), and ANY player-option mods (e.g. 2x, mirror, failoff, noteskin names). The mods
+                          that are not the four keywords above are stored in the entry's sModifiers.
+  10.5 #SONGSELECT keys (ParseCourseSongSelect), KEY=value separated by ':'; lists use ',' ('\,' and '\=' escape)
+    TITLE, GROUP, ARTIST, GENRE (comma lists); DIFFICULTY (comma list of difficulty words); METER=lo-hi (official
+    meter); DURATION=lo-hi seconds; BPMRANGE=lo-hi; SORT=<sort>,<index> (e.g. most played, Randomize, grades);
+    GAINLIVES=n; GAINSECONDS=n; MODS=<showcourse|noshowcourse|nodifficult|player mods>.
+    A range value must have first <= last, otherwise the entry is skipped.
+  10.6 CAN A .crs MAKE THE COURSE NOT FAIL ON LIFE-BAR DEPLETION?
+    Short answer: yes in principle, per entry, with the mod string "failoff" in the #SONG mods field:
+        #SONG:Pack/Song:Hard:nodifficult,failoff;
+    Evidence: PlayerOptions::FromString maps "failoff" to FailType_Off (PlayerOptions.cpp ~1442; other fail words:
+    failarcade/failimmediate, failendofsong/failimmediatecontinue, failatend, faildefault). TrailEntry::GetAttackArray
+    turns an entry's Modifiers into a global attack (Attack::FromGlobalCourseModifier, start 0, 10000 s). The
+    gameplay screen launches the entry's attacks when the song is set up (ScreenGameplay.cpp ~1224), and
+    RebuildPlayerOptionsFromActiveAttacks applies the attack mods with po.FromString to the song-level options.
+    GameState::GetPlayerFailType reads that current FailType; ScreenGameplay treats FailType_Off as never dead
+    (about lines 1885, 1953, 2021). So an entry with failoff should not end the course when the bar empties.
+    Status: reasoned from the code path, NOT run [INFERRED]. Points to check or know:
+      a) It must be on EVERY #SONG line; the attack is cleared at the end of each song. A timed #MODS group
+         (TIME=0:LEN=<seconds>:MODS=failoff before a #SONG) also works in principle but only for that entry.
+      b) The same effect without editing courses: the player's own fail setting (FailOff) before starting. The
+         engine returns the player's setting untouched when it was set explicitly (m_bFailTypeWasExplicitlySet);
+         otherwise in courses the preference Minimum1FullSongInCourses only raises the FIRST song to at least
+         "immediate continue" (GameState::GetPlayerFailType). Whether the theme exposes the setting [UNVERIFIED].
+      c) ONI (#LIVES > 0) is a battery course; ScreenGameplay forces FailType_Immediate for battery when the
+         theme metric ForceImmediateFailForBattery is on (ScreenGameplay.cpp ~1276). The entry attacks are applied
+         during song setup, after that line, so failoff should win [INFERRED from line order]. Avoid #LIVES unless
+         wanted: without it the course is NONSTOP with the normal life bar.
+      d) What the grade/score screen does with a failed-but-continued stage, and whether the theme's own scripts
+         (Simply Love) override fail behaviour in courses [UNVERIFIED; theme Lua not read for this].
+      e) Courses cannot set a course-wide fail type; there is no #FAIL tag [CODE: not in the loader list].
+  10.7 Script support: not built yet. Natural addition: --failoff / a GUI checkbox writing ",failoff" into every
+    #SONG mods field (with or without nodifficult). In-game check C7: build a course with failoff on every entry,
+    let the life bar empty in song 1, and see whether the song and course continue; C8: same without it, as a control.
+
+11. SONGS LOCATION, STALE PACKS AND THE EXISTENCE FILTER (added 2026-10-25)
+  11.1 [OBSERVED by the user, Windows 11 x64] With "Game folder" set to the install folder (C:/Games/ITGmania) and the
+    library rescanned, the histogram came up empty ("0 charts match the pack / folder / length filters") while the
+    pack list still showed packs that had been deleted from disk. Two separate problems:
+    a) The existence check looks for <folder>/<Songs/pack/song> for every chart and found none: the songs are not
+       under that folder, or only some are. The cache stores song paths relative to the game's virtual file system
+       ("Songs/<pack>/<song>/file"), not full paths.
+    b) The pack list was built from the whole scan, so it ignored the existence filter. (A pack list that includes
+       packs missing from disk was therefore not a bug in the filter but in the list.)
+  11.2 Where Songs/ can be on Windows [CODE: arch/ArchHooks/ArchHooks_Win32Static.cpp, v1.3.0]: the folder
+    one level above the executable (the install folder) is mounted read-only at "/" (so <install>/Songs is reachable as /Songs); the
+    per-user folder %APPDATA%/ITGmania (the same folder that holds your Cache) is mounted for Announcers, Cache,
+    Courses, Songs and the rest; the install folder is mounted for writing only when Portable.ini exists there.
+    Result [INFERRED, since the cache does not record which one a song came from]: songs can be in the user-data
+    Songs folder, the install Songs folder, or both, and both show up as "Songs/..." in the cache. The user's Cache is
+    in %APPDATA%/ITGmania, so this is a non-portable install; the install folder alone matched none of the songs,
+    so the songs are probably under %APPDATA%/ITGmania/Songs [UNVERIFIED until the user confirms].
+  11.3 Changes made (make_course_by_rating.py, make_course_gui.py):
+    - "Songs location(s)" accepts several folders separated by ';' (CLI: --root "A;B"); a song counts as present if
+      its folder exists under ANY of them.
+    - A Detect button tests candidate folders (the cache folder's parent, its grandparent, the Courses folder's
+      parent, plus whatever is typed), reports how many cached song folders exist under each, and fills the field
+      with every folder that holds at least one. Browse offers to add to the list instead of replacing it.
+    - The pack list is rebuilt from the charts that exist on disk whenever the location changes (on leaving the
+      field, Enter, Browse or Detect); packs not on disk are hidden and the status bar says how many. Their
+      checked/unchecked state is remembered, so a typo in the path does not lose it.
+    - When the filter leaves 0 charts, the status bar names the folders searched and one example path that was
+      looked for, instead of the generic message.
+  11.4 [TESTED, Linux, synthetic cache] wrong folder -> 0 charts and the explanatory message; Detect found two valid
+    folders (cache parent and Courses parent) and kept only the packs present in them; build picked only present
+    songs; clearing the field restored the full pack list; the earlier GUI test sequence still passes; CLI --root
+    with two folders behaves the same way. NOT yet tried on the user's machine.
+  11.5 In-game/real checks: R1: press Detect on the real library; it should list %APPDATA%/ITGmania (and the install
+    folder if it holds songs) with a high song-folder count. R2: the pack list should then lose the deleted packs.
+    R3: if Detect finds nothing, send the status text so the real path layout can be examined (songs on another
+    drive, a custom "AdditionalSongsFolder", or a differently cased/renamed pack folder).
+
+12. C7 RESULT AND FAIL-HANDLING DETAIL (added 2026-10-28; engine v1.3.0)
+  12.1 [OBSERVED by the user 2026-10-28] Course with "failoff" in the mods field of every #SONG: in song 1 the life bar
+    emptied and the song did NOT stop; it played to the end; afterwards the overall course failed.
+  12.2 Reading of the result: NOT a confirmation of 10.6, and probably a refutation. The observed behaviour is exactly
+    what FailType_ImmediateContinue ("fail immediately but allow playing the rest of the song") and FailType_EndOfSong
+    ("fail if life is at 0 when the song ends") do [CODE: GameConstantsAndTypes.h enum comments; ScreenGameplay.cpp
+    ~1953 and ~2005-2021 only stop the song for FailType_Immediate]. Both are common defaults, so the course may simply
+    have run under the player's default fail type with the failoff mod having no effect. Control C8 (same course
+    without failoff) is needed: if it behaves the same way, failoff changed nothing. [SUPERSEDED by 12.7: the user's default is
+    immediate fail, so failoff DID take effect during the song.] (The preference Minimum1FullSongInCourses, which forces the first song to continue, defaults to false
+    [CODE: PrefsManager.cpp ~205] and is unlikely to be the cause unless the user turned it on.)
+  12.3 How the course fails after a continued song [CODE: ScreenGameplay.cpp]: at SM_NotesEnded (~2940) the stage is
+    marked failed if GetPlayerFailType != Off AND the life meter is failing at that moment; the course then leaves
+    gameplay when bAllReallyFailed (all players' m_bFailed) is true, or when the theme metric StopCourseEarly is set,
+    or on the last song. A failed flag set this way persists for the rest of the course (PlayerStageStats::AddStats ORs
+    m_bFailed), and Grade_Failed follows it. With FailType_Off the marking is skipped, so a working failoff should have
+    avoided the failure at song end.
+  12.4 Timing facts that matter if failoff is only applied late [CODE]: the entry's attack is launched during song
+    setup, but a new attack starts with bOn false and is switched on by PlayerState::Update on the next update;
+    RebuildPlayerOptionsFromActiveAttacks skips attacks that are not on (PlayerState.cpp). CORRECTION (2026-10-28-c): the earlier text here put the
+    attack removal in SM_StartLoadingNextSong (~3014); that line is in SM_LeaveGameplay. For a course that continues,
+    attacks are removed in SongFinished(), called from SM_LoadNextSong (~3118), i.e. when the between-songs banner
+    transition ends, immediately followed by LoadNextSong(). See 12.8.
+  12.5 What would settle it (decisive data, in order of effort):
+    a) Logs: with logging of traces on, Logs/info.txt (and/or log.txt) should contain, per song,
+       "Launch attack 'failoff' against P1 at ..." (PlayerState::LaunchAttack) if the mod was queued; "Player 1 failed"
+       if the stage was failed during the song; and at song end the line
+       "bAllReallyFailed = 0/1, bStopCourseEarly = 0/1, bIsLastSong = 0/1, ...". Those three lines say which of the
+       mechanisms in 12.3 ended the course. [The Trace lines exist in the source; whether this build writes them to
+       log.txt or info.txt is UNVERIFIED.]
+    b) C8: the same course without failoff; compare.
+    c) The player's own fail setting set to Off before starting the course (theme option or the DefaultModifiers
+       preference containing "FailOff"): if this does not fail the course, the engine path is fine and the entry-mod
+       route is what is not taking effect.
+    d) Whether the course ended after song 1 or after the last song, and which screen said "Failed".
+    e) Which theme (Simply Love fork?) and whether it has a StopCourseEarly metric or its own fail logic in Lua
+       [UNVERIFIED, theme Lua not read for this].
+  12.6 Script support: not added. Do not add a failoff option to the script/GUI until 12.5 shows what works.
+  12.7 [OBSERVED by the user 2026-10-28, theme Simply Love] The user's default behaviour for an empty life bar is
+    IMMEDIATE failure, and failoff prevented that: the song did not fail, so the per-entry "failoff" mod takes effect
+    during the song (10.6 mechanism confirmed for the in-song part, in the sense of "the mod is applied"). The user
+    adds that the protection held "only for that song"; whether that means (a) the course still failed at or right
+    after the end of song 1, or (b) song 2 started and failed immediately, was not stated [UNVERIFIED].
+    This corrects 12.2: that reading assumed a continue-type default; with an immediate default the observation shows
+    failoff working. What the code predicts:
+      (a) At song end the failure check is skipped when the fail type is Off (ScreenGameplay.cpp ~2945), and the attack
+          is only removed afterwards (~3014), so the engine path alone should NOT fail the course after song 1 [CODE,
+          INFERRED]. If it did, the cause is outside that path (theme Lua, a StopCourseEarly metric, or another
+          m_bFailed writer). Simply Love's own Lua was not read.
+      (b) Between songs, all attacks are removed (fail type reverts to the default, immediate) and the next entry's
+          attack is queued during song setup and switched on by the next PlayerState::Update, while the life meter
+          keeps its value (OnLoadSong is a no-op for the bar meter, LifeMeter.h), so song 2 begins with the bar still
+          empty. The dance-state failure check only runs while dancing, which starts after the ready/go lead-in, by
+          which time the attack should be on [INFERRED; not proven]. A gap here would make song 2 fail at its start.
+    Next data needed: where it failed (end of song 1, or start/early song 2) and the log lines in 12.5 a).
+
+12.8 LIKELY CAUSE OF THE FAILURE AT THE SONG CHANGE (added 2026-10-28; engine v1.3.0; [INFERRED] from code, not run)
+  [OBSERVED by the user 2026-10-28, reproduced twice] With failoff on every entry, song 1 does not fail when the bar
+  empties; the course fails "immediately after the second song's banner image appears". The user's logs record no
+  gameplay events (Log.txt has only startup and shutdown; Info.txt shows nothing relevant), so the trace lines named
+  in 12.5 a) are not available in this build's logs; drop that route.
+  The mechanism the code points to:
+    1. Between songs the screen stays in STATE_DANCING: m_DancingState is set to STATE_OUTRO only in SM_LeaveGameplay
+       and set to STATE_DANCING only in SM_PlayGo (first song) [CODE: ScreenGameplay.cpp 2930, 3011, 3193]. So the
+       immediate-fail check (the "case STATE_DANCING" block, ~1923-1975) keeps running while the next song loads.
+    2. When the banner transition ends, SM_LoadNextSong runs: SongFinished() removes all attacks (so the failoff of
+       song 1 ends), then LoadNextSong() -> SetupSong() launches song 2's attacks (failoff again) and, at the end
+       of that block, calls  m_PlayerOptions.SetCurrentToLevel(ModsLevel_Stage)  [CODE: ScreenGameplay.cpp 1239;
+       ModsGroup.h: Current = the Stage-level options]. The Stage level holds the player's own settings, so the
+       CURRENT fail type becomes the player's default (immediate) at that instant.
+    3. The Current options only move to the Song level (failoff) in the next frame's PlayerState::Update, which
+       GameLoop runs BEFORE the screen update each frame [CODE: GameLoop.cpp 265 GAMESTATE->Update, then
+       SCREENMAN->Update]. The message is handled inside ScreenGameplay::Update, so the failure check later in that
+       same update sees fail type = immediate.
+    4. The life bar is still empty: LifeMeterBar does not override OnSongEnded or OnLoadSong (LifeMeter.h: empty
+       virtuals; only the battery meter implements OnSongEnded), so the check finds the player failing and marks the
+       stage failed (m_bFailed), posts PlayerFailed, and the course ends.
+  Prediction that follows (cheap tests, all [UNVERIFIED]):
+    T1: if the life bar is above empty at the moment song 1 ends (let it empty mid-song, then recover), the course
+        should NOT fail at the change; only a bar at 0 (<= the passmark) at the song change triggers it.
+    T2: failoff on every entry but the empty bar happens only in the LAST song: the course should finish normally
+        (no song change follows; the end-of-song check sees fail type Off).
+    T3: the player's own fail setting set to Off (so the Stage level is Off) with no failoff in the course: should
+        not fail at the change either.
+  Consequences for the .crs approach: a per-entry mod can protect a song but not the one-frame window at each song
+  change, so a .crs cannot give a reliable no-fail course in v1.3.0 when the bar can reach 0. Possible fixes:
+    - No code: set the player's own fail setting to Off (T3) for the run. Applies to every course/song until changed.
+    - Engine patch (small, not written): keep the Song-level fail type when resetting the Current options in
+      LoadNextSong (1239), or skip the fail check while GAMESTATE->m_bLoadingNextSong is set (that flag is true from
+      SM_StartLoadingNextSong until just before LoadNextSong, so it would not cover the frame in which LoadNextSong
+      runs; the first option is the more direct). Apply to release and beta; theme-independent.
+    - Observation, not a confirmed defect: SetCurrentToLevel(Stage) after launching attacks looks intended to stop
+      course mods from tweening in (comment at ~1236); it also drops the failoff for one frame, and the immediate
+      fail check in STATE_DANCING can fire in it. Beta not checked.
+  12.9 Script support: still not added; with 12.8 a failoff option in the script would give a false sense of safety.
+
+12.10 RESULTS OF T1 AND T3 (added 2026-10-28)
+  [OBSERVED by the user 2026-10-28, Simply Love, failoff on every entry for T1]
+    T1: the course does NOT fail at the song change if the life bar has recovered above empty before the song ends.
+    T3: the course does NOT fail when the global (player's own) fail setting is Off.
+    T2 (bar empties only in the last song): not run.
+  Reading: both match the 12.8 prediction. A bar at 0 at the song change is the trigger, and with the Stage-level fail
+  type Off the one-frame reset in LoadNextSong (ScreenGameplay.cpp 1239) is harmless. This supports 12.8 but does not
+  prove step 3 (the SetCurrentToLevel reset) specifically; an engine patch that removes only that reset and then
+  passes would be the direct test [UNVERIFIED].
+  Status of the no-fail question for .crs files, v1.3.0: per-entry "failoff" stops the in-song fail (confirmed), but a
+  course still fails at a song change when the bar is empty. Working options: the player's global fail setting Off
+  (T3, confirmed), or an engine fix (12.8, not written). No script/GUI option added (12.9).
+
+
+12.11 WOULD REMOVING THE RESET AT ScreenGameplay.cpp 1239 HURT GAMEPLAY? (added 2026-10-28; engine v1.3.0; [INFERRED] from code, nothing run)
+  What the line is [CODE]: the last statement of ScreenGameplay::SetupSong (not LoadNextSong itself):
+    pi->GetPlayerState()->Update(0);                                   // sets attack bOn flags
+    pi->GetPlayerState()->m_PlayerOptions.SetCurrentToLevel(ModsLevel_Stage);   // copies Stage options into Current
+  SetupSong callers [CODE]: first-song setup (line 1289), LoadNextSong (via 1289), the StageFinished loop for skipped
+  course songs (2856, stats only), ReloadCurrentSong. So the reset runs for every song, including song 1.
+  What Current does without the reset [CODE ModsGroup.h, PlayerOptions.cpp Approach]: Current.Approach(Song, delta).
+    - Discrete options (DO_COPY: FailType, turns, transforms, noteskin, stealth, etc.) jump to the Song-level value at once.
+    - Continuous options (APPROACH: speed, boost, drunk, reverse, etc.) move toward the Song level at their own speed.
+    - Update(0) has delta 0, so continuous options do not move in SetupSong.
+  Consequences of deleting the line [INFERRED]:
+    1. FailType: Current keeps the Song-level value (failoff) through the song change. This is the fix being tested.
+    2. Continuous options: Current keeps the previous song's values instead of snapping to the Stage level. Previous-song
+       mods (e.g. a boost or drunk entry mod) would visibly tween out and the new song's tween in, instead of the snap
+       the line gives. Likely cosmetic, only for courses whose entries use continuous mods. A .crs from this script uses
+       no mods, so it would not see this.
+    3. Other discrete options also take the Song value at once instead of one frame late; not expected to matter.
+    4. Stats loop (2856) and ReloadCurrentSong: Current options would stay as they were; no gameplay effect expected,
+       [UNVERIFIED].
+    5. Song 1: Current is already Stage-level at that point in normal play, so no change expected [UNVERIFIED].
+  Observation, not a confirmed defect: the code comment says course mods should not tween on, but the line sets Current to
+  the Stage level, not the Song level, so continuous course mods would still tween in from the Stage value. The line seems
+  to do the opposite of the comment for those; the effect that is certain is dropping discrete Song-level values for one frame.
+  Narrower alternative (preferred over deleting) [INFERRED, not compiled]:
+    auto& mods = pi->GetPlayerState()->m_PlayerOptions;
+    mods.SetCurrentToLevel(ModsLevel_Stage);
+    mods.Get(ModsLevel_Current).m_FailType = mods.GetSong().m_FailType;
+  Keeps all existing snap behavior and only protects the fail type. Whether the Song level already holds the course's
+  failoff at that point depends on RebuildPlayerOptionsFromActiveAttacks having run in Update(0) [UNVERIFIED].
+  Not checked: beta fork. Not tested: any build. A build with either change plus the C7 course (T-tests) would confirm.
+
+12.12 INTENT AND DEPENDENCY CHECK FOR THE RESET (added 2026-10-28; engine v1.3.0; Simply Love HEAD dd06138 of 2026-06-30, which may differ from the user's installed version)
+  Intent [INFERRED]: the comment at ScreenGameplay.cpp 1237 is about course mods not tweening on; fail type is discrete
+    (DO_COPY in PlayerOptions::Approach) and cannot tween, so dropping it serves no stated purpose. Not stated by the
+    authors; the repo is a shallow clone, so no history was checked.
+  Proposed general change [INFERRED, not compiled]: SetCurrentToLevel(ModsLevel_Song) instead of ModsLevel_Stage at 1239.
+    Song level is current at that point [CODE]: LaunchAttack (PlayerState.cpp 139) and RemoveActiveAttacks (151) call
+    RebuildPlayerOptionsFromActiveAttacks, which assigns Song = Stage + attacks that are on; Update(0) rebuilds again if
+    a global attack turns on.
+  Why a hidden dependency is limited [INFERRED]: Current approaches Song every frame (ModsGroup::Update). After the reset
+    frame, Current equals Song for discrete options regardless. The reset only decides (a) the values in that one frame
+    and (b) where continuous options (boost, drunk, reverse amount, speed) start tweening from.
+  Engine sites that write Song level [CODE grep ModsLevel_Song in *.cpp]: PlayerState.cpp 178 (rebuild);
+    ScreenGameplay.cpp 1281 (battery lives: FORCE_IMMEDIATE_FAIL_FOR_BATTERY assigns FailType_Immediate at Song level
+    just before SetupSong, so the engine itself treats the Song level as the one in effect); ScreenGameplay.cpp 1231
+    (SongOptions); ScreenDebugOverlay 778 (SongOptions). The only other SetCurrentToLevel call is ScreenEdit.cpp 3923,
+    which runs after RemoveActiveAttacks and Rebuild, so Stage is correct there.
+  Observation, not confirmed: in a course with entry attacks, LaunchAttack in SetupSong rebuilds Song from Stage and so
+    overwrites the battery-lives forced immediate fail set at 1281. Separate from this issue; not tested.
+  Themes [CODE]:
+    _fallback: only Scripts/03 CustomSpeedMods.lua touches Current/Song levels; it assigns Preferred, Stage, Song and
+      Current together, so it is unaffected.
+    Simply Love (HEAD dd06138): no use of ModsLevel_Current. Song-level uses are reads (DisplayMods, BPMDisplay, SL_ITL,
+      underlay/default.lua) plus ChangeSpeedModBeforeFirstNote.lua, which applies speed through ApplyGameCommand
+      ("mod,c460"); GameCommand assigns at Stage, which propagates to Song and Current (ModsGroup::Assign), so Stage
+      and Song agree. GetCurrentPlayerOptions() readers (NoteField default.lua, ColumnCues, ColumnFlashOnMiss,
+      ErrorBar Monochrome, Evaluation Arrows) read at actor load/init. Whether that is before or after SetupSong
+      [UNVERIFIED]; with no course mods Stage == Song, so no difference.
+    Third-party themes: cannot be ruled out. Only code that writes Song level directly (not via Stage) and relies on the
+      next song's reset to discard it would differ, and then only in the one-frame values or continuous-mod tween start.
+  Next: build with the one-level change; run C7 (failoff per entry, empty bar) and a course with an immediate continuous
+    mod (e.g. boost) to see the tween-in; compare against stock.
+
+12.13 PATCH WRITTEN: patches/itgmania_course_reset_song_level_v1.3.0.patch (added 2026-10-28)
+  Change [CODE]: ScreenGameplay.cpp SetupSong, SetCurrentToLevel(ModsLevel_Stage) -> SetCurrentToLevel(ModsLevel_Song),
+  comment rewritten. One statement; no other file touched.
+  Checks done: git apply --check clean on v1.3.0 (8a3bf88); g++ -std=c++20 -fsyntax-only src/ScreenGameplay.cpp exit 0
+  (include paths src, src/generated, extern, extern/lua-5.1); no line over 80 columns.
+  NOT done: full build, any run in game, beta fork (3f5f27725a not checked out in this session), push to forks.
+  Left out on purpose: the battery-lives forced-immediate-fail overwrite (12.12 observation); separate design question.
+  In-game checks after building [UNVERIFIED until run]:
+    P1. C7 course: failoff on every entry, empty the bar in song 1; expect the course continues past the song change.
+    P2. Same course with the player's fail setting at its normal value (immediate): expect the same.
+    P3. Control: a normal non-course song and a course with no mods play as before.
+    P4. A course entry with an immediate continuous mod (e.g. boost): note whether it appears at full strength at song
+        start (expected with this patch) or tweens in; compare with a stock build.
+
+12.14 BETA CHECK AND PUSH (added 2026-10-28)
+  Beta (fork beta 29275af): [CODE] src/ScreenGameplay.cpp has the identical SetCurrentToLevel(ModsLevel_Stage) at
+  SetupSong (line 1235) with the same comment; ModsGroup.h, PlayerState.cpp and PlayerOptions.cpp are identical to the
+  release fork; the FORCE_IMMEDIATE_FAIL_FOR_BATTERY block and the SetupSong call are present. The reasoning in 12.8-12.12
+  therefore applies to beta. (Beta differs in ScreenGameplay only in the SM_StartHereWeGo/SM_StopHereWeGo messages, and
+  in GameState.cpp memory-card mount handling; neither touches this path.)
+  Patch applied with git apply (clean on both); g++ -fsyntax-only OK on both.
+  Pushed 2026-10-28 to the fork: release cbeaa30 -> 772575e, beta 29275af -> ceaa23b (author Claude, same as earlier
+  fork commits). Fork Actions runs were started by the push; results unread at the time of writing. NOT run in game.
+  Checks P1-P4 (12.13) are still open.
+
+12.15 BATTERY-LIVES CASE EVALUATED (added 2026-10-28; engine v1.3.0 and fork beta 29275af; [CODE] reading, nothing run)
+  Setup [CODE]:
+    - Battery arises from: the player's "battery" option; PLAY_MODE_ONI switch (GameCommand.cpp 876-890, Stage level);
+      course #LIVES (section 10.2 correction, Stage level, also sets m_BatteryLives).
+    - ScreenGameplay::LoadNextSong 1276-1286: if theme metric ForceImmediateFailForBattery (default true in _fallback
+      metrics.ini 3530; Simply Love HEAD does not override [CODE]) and Stage LifeType == Battery, assigns
+      FailType_Immediate at the SONG level only (ModsGroup::Assign does not touch Current for level Song).
+    - Current picks it up through ModsGroup::Update -> Current.Approach(Song) (DO_COPY for FailType), next frame.
+    - GameState::GetPlayerFailType reads Current.m_FailType. STATE_DANCING: ft Off/EndOfSong -> skipped; battery and
+      ft Immediate -> m_bFailed set, "Oni die" (FailFadeRemovePlayer) unless the last player to fail; bAllFailed only for
+      Immediate with a failing life meter.
+    - Song level is rebuilt as Stage + attacks that are on by PlayerState::RebuildPlayerOptionsFromActiveAttacks, called
+      from LaunchAttack, RemoveActiveAttacks, and PlayerState::Update whenever an attack turns on or off.
+  Cases [INFERRED from the above]:
+    A. Battery, song with no attacks: forced Immediate at Song level survives (the rebuild in SongFinished happens
+       BEFORE the assignment at 1281, SetupSong rebuilds nothing). Works as intended in stock. With the 12.13 patch:
+       Current := Song, so Immediate applies at once instead of one frame late; no behavior change that matters.
+    B. Battery, song with an attack at start (course entry mods, e.g. failoff, or a simfile attack): SetupSong's
+       LaunchAttack rebuilds Song = Stage + attacks, which overwrites the forced Immediate. The player's own fail type
+       (or the attack's fail type) then applies. So an explicit failoff attack wins over the forced Immediate here, and
+       a non-fail attack (e.g. boost) silently drops the force. Consequence: a battery player with fail type EndOfSong
+       or Off keeps playing with 0 lives (no Oni die); the stage fails at song end for EndOfSong.
+    C. Battery, timed attack starting or ending mid-song: PlayerState::Update rebuilds again, so the force is lost from
+       that moment on, even if the song had no attack at its start. Same consequence as B.
+    D. Non-battery life types: the force never applies; unaffected.
+  Net: the force is applied at a level that any later rebuild discards, so it is reliable only for battery songs with
+  no attacks. Whether explicit attacks SHOULD override the force is a design choice the code does not state
+  [UNVERIFIED intent]. Current behavior is inconsistent (explicit failoff wins, a boost attack also wins).
+  Relation to the 12.13 patch: independent. The patch makes Current follow Song, so it neither fixes nor worsens B/C.
+  Relevance to this project: the script's --lives option (and the GUI Lives field) writes #LIVES, which per the
+    correction in 10.2 makes a BATTERY course, not just an ONI label. A script course meant to avoid failing should not
+    use --lives. A battery course from the script has no attacks (no mods), so it is case A: forced Immediate, lives
+    drain, a player with 0 lives is removed or the stage fails.
+  Possible fix shapes (none written):
+    1. Reapply the force after each rebuild (in PlayerState or at the SetupSong attack launch and attack begin/end):
+       needs the theme metric available in PlayerState; touches more code.
+    2. Assign the force at Stage level instead of Song: survives rebuilds, but leaks into GetStage() readers (the code
+       reads Stage for LifeType in several places) and into later screens until Stage is rebuilt [UNVERIFIED].
+    3. Leave as is and document: explicit course/song attacks override the battery fail forcing.
+    Recommendation: option 3 unless the user wants guaranteed Immediate for battery. The case is rare (battery +
+    attacks) and the observed outcome is not harmful.
+  In-game checks, none run [UNVERIFIED]:
+    B1. Battery lives (option "4 lives" or a course with #LIVES), player fail setting EndOfSong, course whose first
+        entry has an attack such as boost: lose all lives in song 1. Prediction: the song continues with 0 lives (no
+        removal) instead of ending at once.
+    B2. Same with an entry that has no attack: prediction: removed/failed at once (forced Immediate).
+    B3. Same as B1 with failoff in the entry: prediction: no fail at all.

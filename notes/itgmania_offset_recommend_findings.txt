@@ -1,0 +1,359 @@
+ITGMANIA - MULTI-SONG GLOBAL OFFSET RECOMMENDATION: ENGINE AND THEME FINDINGS
+REVISION: 2026-10-15-c | file: notes/itgmania_offset_recommend_findings.txt
+
+FILE STATUS
+ Status:     ACTIVE, read-only findings; nothing built, nothing run in game
+ Basis:      engine v1.3.0 (8a3bf88) read 2026-10-14/15; engine beta 05a6439 compared
+             2026-10-15 (section 14). Simply Love: user's fork, branch itgmania-release, tip
+             2c58dab (sections 11-12); upstream Simply Love itgmania-release dd06138 and
+             itgmania-beta 649706f compared 2026-10-15 (section 14).
+ Topic key:  offset-recommend
+ Read when:  designing a theme/Lua feature that recommends a Global Offset from many songs
+ See also:   engine:3 (architecture), toggle (Group/Pack.ini), series notes (Pack.ini parsing)
+ Tags:       [CODE] read in source, [INFERRED] reasoned, [UNVERIFIED] not determined,
+             [TESTED] user-run in game. Claude cannot run the game.
+
+1. THE IDEA (user, 2026-10-14)
+ F6 Machine autosync gets the audio calibration "close" but leaves a consistent residual.
+ Proposal: look at timing offsets over a whole multi-song session and recommend a Global
+ Offset change. Rationale: individual songs are synced early or late (undocumented which,
+ and in which direction); averaging many songs should wash that out.
+ Assumption stated for design: the library holds packs flagged NULL and packs flagged ITG
+ (the 9 ms pack offset), handled by Pack.ini.
+
+2. ANSWER
+ Feasible in a theme's Lua; no C++ change needed. [CODE] for every data path below.
+ Simply Love already records every tap offset per stage (section 11), so the theme side
+ is mostly aggregation. Session boundaries are known (section 12). Engine autosync reset
+ behaviour is known (section 13). The relevant code is unchanged on engine beta and on
+ upstream Simply Love (section 14). Not yet built.
+
+3. PER-TAP OFFSET DATA (engine)
+ [CODE] Player.cpp ~2425-2455: fNoteOffset = (fStepSeconds - fMusicSeconds) / MusicRate.
+ [CODE] Player.cpp ~2735-2762: result.fTapNoteOffset = -fNoteOffset (comment: negative =
+        early hit). EarlyHit message carries TapNoteOffset = -fNoteOffset.
+ [CODE] Player::SetJudgment (Player.cpp ~3509-3520) broadcasts the Judgment message with
+        Early (fTapNoteOffset < 0), TapNoteOffset, TapNoteScore, EarlyTapNoteScore,
+        EarlyTapNoteOffset. A theme collects offsets from JudgmentMessageCommand.
+ [CODE] PlayerStageStats (.cpp/.h) has no per-tap offset history (grep found none), so the
+        theme must record offsets itself (Simply Love does, section 11).
+ [CODE] ScoreKeeperNormal.cpp:627 and NoteDataWithScoring.cpp:52,91,355 read fTapNoteOffset
+        internally (score/stat use); not exposed as a history.
+
+4. SIGN CONVENTION
+ [CODE] Message/stored offset: negative = early (= -fNoteOffset).
+ [CODE] AdjustSync adds the raw mean of fNoteOffset to GlobalOffsetSeconds
+        (AdjustSync.cpp AutosyncOffset: Set(GlobalOffsetSeconds + mean)).
+ [INFERRED] So the correction is: new = old - mean(TapNoteOffset as broadcast).
+ [UNVERIFIED] Direction in game. Check: set Global Offset +0.050, play a song, see whether
+        the computed recommendation lowers it.
+ [CODE] SaveSyncChanges text: "Global Offset from %+.3f to %+.3f (notes %s)"; delta > 0 reads
+        "earlier" (AdjustSync.cpp GetSyncChangeTextGlobal).
+
+5. HOW F6 MACHINE AUTOSYNC WORKS (why a residual can remain)
+ [CODE] AdjustSync.h:45 OFFSET_SAMPLE_COUNT = 24. HandleAutosync collects until 24 samples,
+        then AutosyncOffset(): mean, stddev; if stddev < 0.03 s then (Machine)
+        GlobalOffsetSeconds += mean; else system message "Autosync: Correction NOT applied.
+        Deviation too high." Each batch is independent; a rejected batch is discarded.
+ [CODE] Player.cpp ~2691: only taps with score >= TNS_W3 and a human controller are fed in.
+        TapNoteScore order (GameConstantsAndTypes.h ~223-235): None, HitMine, AvoidMine,
+        CheckpointMiss, Miss, W5, W4, W3, W2, W1, CheckpointHit. So W3/W2/W1 count;
+        W4, W5 and misses do not. [INFERRED] This truncates the sample toward the centre of
+        the player's distribution.
+ [CODE] F6 = debug-overlay gameplay button (ScreenDebugOverlay.cpp ~232). DebugLineAutosync
+        (~743-780) cycles m_AutosyncType at ModsLevel_Song and broadcasts
+        Message_AutosyncChanged. The overlay can be disabled (comment ~line 66).
+ [CODE] Per-song reset of the mode and of the sample buffer: see section 13 (S3, done).
+ [CODE] Changes persist only when accepted at the end-of-song sync prompt: callers
+        ScreenGameplay.cpp ~3168/3181 (IsSyncDataChanged), ScreenSaveSync.cpp (Save/Revert),
+        GameState.cpp:342/:734 (ResetOriginalSyncData). SaveSyncChanges writes prefs if the
+        global offset changed; RevertSyncChanges restores the original.
+
+6. READING / WRITING THE OFFSET FROM LUA
+ [CODE] PrefsManager.cpp:249 m_fGlobalOffsetSeconds("GlobalOffsetSeconds", -0.008f).
+ [CODE] PrefsManager.cpp ~604-617 Lua GetPreference / SetPreference.
+ [CODE] PrefsManager.cpp ~667 Lua SavePreferences -> SavePrefsToDisk.
+ [CODE] RageFile.cpp (Lua list ~442-455): Open, Close, Write, Flush, Read, ReadBytes, Seek,
+        Tell, GetLine, PutLine, destroy, GetError, ClearError, AtEOF.
+ [CODE] ProfileManager::GetProfileDir(slot) (ProfileManager.cpp:974) gives per-slot and
+        machine profile directories.
+ [CODE] Simply Love already writes files from Lua into the profile directory (section 11.5),
+        so profile-dir logging is a proven path in this theme. Other paths [UNVERIFIED].
+
+7. PACK SyncOffset (NULL vs ITG) AND WHAT IT MEANS FOR THE AVERAGE
+ [CODE] Group.cpp:62-71: default m_fSyncOffset = 0 if pref DefaultSyncOffset is NULL, else
+        -0.009. Group.cpp:118-134: Pack.ini [Group] SyncOffset=NULL -> 0; =ITG -> -0.009;
+        other values log a warning. Code comments: ITG means "remove the 9ms ITG bias";
+        NULL is "what we shift everything to".
+ [CODE] Song.cpp:433-435, 488-491, 514-517, 679-681: the group offset (fallback 0 / -0.009
+        by DefaultSyncOffset) is stored in m_fBeat0GroupOffsetInSeconds of the song and every
+        Steps timing. TimingData.cpp:799 and :875 add it to the beat-0 offset.
+ [CODE] Group Lua binding exposes GetSyncOffset (Group.cpp:183). Simply Love already calls
+        SONGMAN:GetGroup(song):GetSyncOffset() (Graphics/MusicWheelItem Course NormalPart.lua:27).
+ CONCLUSION (corrects an earlier loose statement):
+ [INFERRED] The pack offset is a NORMALIZING shift applied at load, before judgment. If a
+        pack's flag matches how it was actually synced, a NULL-pack song and an ITG-pack song
+        give the same mean offset for the same player and hardware: no built-in 9 ms spread.
+        The reason the flag exists is so one Global Offset works across both kinds of pack.
+ [INFERRED] A residual ~9 ms spread appears only where a flag is wrong or missing: a pack
+        with no Pack.ini falls back to DefaultSyncOffset (Group.cpp:70-71), correct only if
+        those packs really are synced that way.
+ [UNVERIFIED] Whether flag-corrected data is flat in practice. The 9 ms is a convention;
+        individual packs and songs still vary (the scatter the feature wants to average).
+ DESIGN RULES
+  a. Do not subtract the group offset from collected offsets (that undoes the normalization).
+  b. Log the group's SyncOffset (GetSyncOffset) with every song record.
+  c. Report the recommendation overall AND per pack/flag. A NULL-vs-ITG gap near 9 ms in
+     the user's own data would indicate a mis-flagged pack or a wrong DefaultSyncOffset.
+
+8. DESIGN IMPLICATIONS
+ - Use the same window as autosync (W1-W3) so outliers do not drag the mean; a stricter or
+   trimmed window is a design choice. Simply Love's stored data includes W4/W5 and misses
+   (section 11), so the filter must be applied by the new code.
+ - Average per-song means (equal weight per song), then median or trimmed mean across songs.
+ - Record per song: chart identity (hash/path), pack, group SyncOffset, n, mean, stddev,
+   music rate. Sorted residuals would start documenting early/late songs.
+ - Variance alone has no direction; the signed mean is required.
+ - Check correlation of residuals with BPM / notes per second (hardware latency vs reaction
+   bias) before trusting a single number.
+ - Music rate: the engine divides by rate (section 3), so offsets are already in chart time.
+ - Session scope (section 12): the data lives only in memory and is wiped at the title menu,
+   so a recommendation that should span several visits needs its own on-disk log.
+ - F6 interaction (section 13): if Machine autosync is used during the session, the global
+   offset can change between songs, so offsets from later songs are measured against a
+   different offset than earlier ones. The recommender must account for that (13.5).
+
+9. OPEN CHECKS (Claude cannot run the game)
+ Source work:
+  S1. DONE 2026-10-14: how Simply Love consumes TapNoteOffset (section 11).
+  S2. PARTLY DONE: SL writes text/JSON into the profile directory (11.5). Machine-profile
+      directory and any Save/ path not checked.
+  S3. DONE 2026-10-15: per-song autosync reset (section 13).
+  S4. DONE 2026-10-15: beta and upstream comparison (section 14): no relevant difference.
+  S5. DONE 2026-10-15: when the SL session data resets (section 12). Remaining sub-items:
+      which message the engine sends to reach the title menu after ScreenGameOver (assumed
+      the normal flow, not traced); course-mode behaviour of the per-stage index (not traced).
+  S6. How Global Offset changes made by autosync during a session are visible to Lua
+      (13.5): grep found no per-stage record of GlobalOffsetSeconds in Simply Love; a
+      recommender would have to record it. OPEN (design item, not a source question).
+ In-game checks (user):
+  G1. Sign: set Global Offset +0.050, play a song, confirm a systematically late/early mean
+      and that the recommendation moves the offset the right way.
+  G2. Play 3-4 songs with F6 off; compare per-song means with the grade-screen mean timing.
+  G3. NULL vs ITG: play 4-5 songs from a NULL-flagged pack and 4-5 from an ITG-flagged pack;
+      compare mean offsets. ~9 ms gap = flags do not match how the packs were synced.
+  G4. On the evaluation screen's offset histogram/scatter, confirm that early taps appear on
+      the left (negative) side, matching the engine sign in section 4.
+  G5. Play two songs, press Back to the title menu (or let the game end), start again,
+      and confirm ScreenEvaluationSummary shows only the new session's songs.
+  G6. With a guest on P2, play a song, then join/unjoin a second guest (or re-join P2)
+      and check whether the earlier P2 stage entries disappear (12.4).
+  G7. Press F6 (twice for Machine) in song 1, finish it, and check on song 2 that the
+      autosync indicator is back to off (13.1). Also check that a song with fewer than 24
+      qualifying taps never prints an "Autosync: Correction applied" message (13.3).
+  G8. NEW: repeat G1, G4 and G7 on whichever build the feature will actually run on (the
+      fork's release build and its beta build), since section 14 is a code comparison only.
+
+10. NEXT STEPS
+ - Prototype in Lua inside the Simply Love fork: aggregate SL[pn].Stages.Stats[*].sequential_offsets
+   (already filled), join with song/steps and the pack's SyncOffset, show a session
+   recommendation (e.g. on ScreenEvaluationSummary) and/or write a log into the profile dir;
+   apply via SetPreference + SavePreferences only on user confirmation.
+ - Record the GlobalOffsetSeconds value in effect at each stage start (S6/13.5).
+ - Decide whether to persist a per-song log on disk (survives the title-menu reset).
+
+11. SIMPLY LOVE (user's fork, branch itgmania-release, 2c58dab; mainline-derived code)
+ 11.1 [CODE] BGAnimations/ScreenGameplay overlay/JudgmentOffsetTracking.lua: a per-player
+      Def.Actor listening to JudgmentMessageCommand. It skips hold-note scores and, if
+      params.TapNoteOffset exists, appends one record per tap to a local table
+      sequential_offsets: { time, offset, is_autohit }.
+      - time = courseOffset + GAMESTATE:GetCurMusicSeconds()
+      - offset = params.TapNoteOffset (engine sign: negative = early), or the STRING "Miss"
+        for Miss and CheckpointMiss (the engine's 0 ms offset on those is meaningless)
+      - is_autohit = true for CheckpointHit, or hold-head-only rows when the theme metric
+        RequireStepOnHoldHeads is false (Pump-style): these are not real step timings and must
+        be excluded from an average.
+      - Not tracked at all in Casual game mode (file returns early).
+ 11.2 [CODE] Course mode: time is shifted by the summed GetLastSecond() of earlier songs;
+      offsets themselves are unaffected.
+ 11.3 [CODE] OffCommand of that actor stores the table in
+      SL[pn].Stages.Stats[SL.Global.Stages.PlayedThisGame + 1].sequential_offsets. The
+      per-stage table is created empty in ScreenGameplay overlay/default.lua:37.
+ 11.4 [CODE] Per-stage data also stored on ScreenEvaluation (PerPlayer/Storage.lua): profile
+      name or "[GUEST]", grade, score, judgments W1-W5/Miss, steps (Steps or Trail),
+      difficulty, meter, stepartist, timing windows. ScreenEvaluation common/Shared/
+      GlobalStorage.lua stores SL.Global.Stages.Stats[n] = { song, MusicRate }.
+      The data is NOT saved to disk.
+ 11.5 [CODE] File writing: RageFileUtil.CreateRageFile(); f:Open(path, 2) (write) / Write /
+      Close / destroy. Used for Favorites (SL-FavoritesHandler.lua: "txt file in player's
+      profile directory"), ITL data (SL_ITL.lua: PROFILEMAN:GetProfileDir(slot) .. file;
+      returns early if no profile dir, i.e. for guests), custom scores, GrooveStats helpers.
+ 11.6 [CODE] Existing consumers: ScreenEvaluation Lower/ScatterPlot.lua and Panes/Pane5
+      (offset histogram) read sequential_offsets. They run a per-song view only; no
+      cross-song aggregate or recommendation exists in the theme.
+ 11.7 [CODE] Other SL uses of TapNoteOffset (not per-session): error bars (ErrorBar/*.lua),
+      judgment tilt (Graphics/Player judgment.lua), FA+ W0 test (SL-Helpers.lua IsW0Judgment).
+ 11.8 [CODE] Operator menu row GlobalOffsetSeconds (SL-OperatorMenuOptions.lua:334) exists;
+      it uses offsetMS(...), i.e. the theme already edits this preference from Lua.
+ 11.9 [INFERRED] A recommender needs no new hooks: at ScreenEvaluationSummary (or each
+      ScreenEvaluation) it can read SL[pn].Stages.Stats, filter out "Miss" strings, autohits
+      and W4/W5, and use song/steps from SL.Global.Stages.Stats and SL[pn].Stages.Stats[n].steps.
+      Pack from song:GetGroupName() / SONGMAN:GetGroup(song):GetSyncOffset().
+ 11.10 [UNVERIFIED] Whether a pad-latency problem also shows in the Visual Delay
+      (VisualDelaySeconds) pref; this feature recommends Global Offset only.
+
+12. WHEN THE SIMPLY LOVE SESSION RESETS (S5, read 2026-10-15)
+ 12.1 [CODE] Full reset: Scripts/SL_Init.lua:513-516 InitializeSimplyLove() calls
+      SL.P1:initialize(), SL.P2:initialize(), SL.Global:initialize(). Each initialize()
+      rebuilds Stages = { Stats = {} } for the player (SL_Init.lua:98-99) and
+      Stages = { PlayedThisGame = 0, Remaining = SongsPerPlay, Stats = {} } for Global
+      (SL_Init.lua:133-136). Called at theme load (SL_Init.lua:520) and at the top of
+      BGAnimations/ScreenTitleMenu underlay/default.lua:4. These are the only two callers of
+      InitializeSimplyLove in the theme (grep). So the session is everything between two
+      visits to ScreenTitleMenu. The code comment calls it a "game cycle".
+ 12.2 [CODE] Stage counter: SL.Global.Stages.PlayedThisGame is incremented only in the
+      OffCommand of Graphics/ScreenEvaluationStage header.lua:20 (deliberately late, per its
+      comment, so reloading the evaluation screen in testing does not bump it). Stats are
+      stored at index PlayedThisGame + 1 by the gameplay overlay and evaluation screens;
+      ScreenEvaluationSummary reads SL.Global.Stages.PlayedThisGame as its stage count.
+      [INFERRED] The offsets for the stage just played are at index PlayedThisGame + 1 while
+      on ScreenEvaluation, and at index PlayedThisGame after that screen has been left.
+      A recommender must use the right index depending on where it runs.
+ 12.3 [CODE] "Play again" does NOT reset the session: ScreenPlayAgain underlay.lua:61-62 only
+      resets SL.Global.Stages.Remaining and decrements ContinuesRemaining; PlayedThisGame and
+      Stats are untouched. [INFERRED] Continued credits therefore extend the same session.
+ 12.4 [CODE] Per-player reset: Graphics/MusicWheelItem Song NormalPart/Unlocks.lua:8 and
+      Favorites.lua:8, inside PlayerJoinedMessageCommand, call
+      SL[pn]:initialize() when the joining player has no persistent profile (a guest) (they
+      also call GAMESTATE:ResetPlayerOptions). initialize() wipes that player's
+      Stages.Stats. [INFERRED] If a guest slot is (re)joined mid-session, that player's
+      earlier per-song offsets are lost while SL.Global.Stages (the song list and stage
+      counter) is kept, so the per-player and global stage indexes can disagree. Whether this
+      join message can fire mid-session in normal play is [UNVERIFIED] (check G6).
+ 12.5 [CODE] Casual mode records nothing (11.1), so a Casual session has no offsets.
+ 12.6 DESIGN CONSEQUENCES
+  a. Compute at ScreenEvaluationSummary (or on demand from a menu) from the in-memory data,
+     defending against missing entries (nil sequential_offsets, nil steps) per stage.
+  b. Because the title menu wipes everything, anything meant to span visits (e.g. a running
+     per-song residual log, or a recommendation based on many sessions) must be appended to a
+     file in the profile directory at the end of each stage (or at ScreenEvaluationSummary).
+     Guests have no profile directory, so a machine-profile or Save/ path would be needed
+     for guest play ([UNVERIFIED] that path is writable; S2).
+  c. Treat each stage's entry as (player, index) and verify it with the song list in
+     SL.Global.Stages.Stats[index].song before pooling, because of 12.4.
+  d. In-game checks G5 and G6 confirm the reset behaviour.
+
+13. ENGINE: PER-SONG AUTOSYNC RESET (S3, read 2026-10-15, v1.3.0)
+ 13.1 The mode (m_AutosyncType) resets to the preferred value at every stage start.
+  [CODE] ModsGroup.h:12-17 levels, in order: Preferred, Stage, Song, Current ("Current
+         approaches Song"). ModsGroup::Assign(level, v) copies v into every level from
+         `level` up to but not including Current, and also into Current unless level is Song
+         (ModsGroup.h:79-86).
+  [CODE] ScreenDebugOverlay.cpp ~778 (F6) assigns m_AutosyncType at ModsLevel_Song only. So
+         F6 changes Song (and, via ModsGroup::Update -> Approach, Current; SongOptions::Approach
+         copies m_AutosyncType with DO_COPY, SongOptions.cpp:42) but leaves Stage and
+         Preferred untouched.
+  [CODE] GameState::BeginStage (GameState.cpp:723; called from ScreenGameplay.cpp:506,
+         "called once per stage") does
+         m_SongOptions.Assign(ModsLevel_Stage, m_SongOptions.GetPreferred()) (GameState.cpp:743-744)
+         unless ARE_STAGE_SONG_MODS_FORCED. That copies Preferred into Stage, Song and Current,
+         overwriting the F6 setting.
+  [INFERRED] Result: F6 autosync set during song N lasts to the end of song N and is Off again
+         on song N+1 (unless the Preferred value is itself autosync, below). F6 must be pressed
+         again each song.
+  [CODE] Exception 1: SongOptions::FromString accepts "autosync", "autosyncsong",
+         "autosyncmachine", "autosynctempo" (SongOptions.cpp:181-185). If any of these is in the
+         player's default/preferred modifiers, every song would start with that mode.
+         [UNVERIFIED] whether any theme or the user's setup puts it there.
+  [CODE] Exception 2: ScreenGameplaySyncMachine (the sync-machine screen) assigns
+         AutosyncType_Machine at ModsLevel_Stage (ScreenGameplaySyncMachine.cpp:65-67).
+  [CODE] Exception 3: PlayerState::RebuildPlayerOptionsFromActiveAttacks rebuilds Song from
+         Stage (PlayerState.cpp:167-180) when attacks start/end (callers PlayerState.cpp:95,
+         139, 151; ScreenGameplay.cpp:1030, 3105). [INFERRED] Songs with attacks/mods queues
+         could clear an F6 setting made at Song level mid-song; not verified.
+ 13.2 The sample buffer resets every stage.
+  [CODE] BeginStage calls AdjustSync::ResetOriginalSyncData() (GameState.cpp:734), which
+         records s_fGlobalOffsetSecondsOriginal = current GlobalOffsetSeconds and calls
+         ResetAutosync() (AdjustSync.cpp:82-87): s_iAutosyncOffsetSample = 0 and the tempo
+         data is cleared. GameState.cpp:342 (game reset) calls it too.
+  [CODE] After a completed batch AutosyncOffset() also zeroes s_iAutosyncOffsetSample
+         (AdjustSync.cpp:231), whether or not the correction was applied.
+ 13.3 Consequences of 13.2:
+  [INFERRED] A partial batch (fewer than 24 qualifying W1-W3 taps) at the end of a song is
+         discarded. A song with fewer than 24 qualifying taps contributes nothing.
+  [INFERRED] There is no carry-over of samples between songs; batches never span songs.
+ 13.4 Persistence of an applied correction:
+  [CODE] Machine autosync sets GlobalOffsetSeconds in memory immediately when a batch passes
+         (AdjustSync.cpp, Set(GlobalOffsetSeconds + mean)). Writing it to disk happens only if
+         the end-of-song sync prompt is accepted (SaveSyncChanges), else RevertSyncChanges
+         restores s_fGlobalOffsetSecondsOriginal (the value recorded at stage start).
+ 13.5 Design consequences:
+  a. If the player uses F6 during a session, the in-memory Global Offset can change within a
+     song (after each passing 24-tap batch) and between songs. Tap offsets recorded after a
+     change are relative to the new offset, those before to the old one.
+  b. For a clean recommendation, either (i) collect with F6 off, or (ii) record
+     GlobalOffsetSeconds at each stage start (and, if wanted, at stage end) and convert each
+     song's mean to a common reference: the recommendation for a song measured under offset G_s
+     is G_s - mean_s; pool those recommended values, not raw means. [INFERRED] from the
+     sign rule in section 4. Within-song changes make (ii) approximate for songs where
+     autosync fired.
+  c. If the user rejects the end-of-song sync prompt, the offset reverts to its stage-start
+     value, so the next song starts again from the old offset.
+
+14. BETA AND UPSTREAM COMPARISON (S4, 2026-10-15)
+ Method: shallow clones, file diffs against the v1.3.0 clone (engine) and against each other
+ (Simply Love), plus grep of the specific lines the findings rest on. This is a source
+ comparison; nothing was built or run.
+ 14.1 Engine beta, upstream itgmania/itgmania branch beta, head 05a6439.
+  [CODE] Byte-identical to v1.3.0 (diff = 0 lines): AdjustSync.cpp, AdjustSync.h, ModsGroup.h,
+         SongOptions.cpp, SongOptions.h, ScreenGameplaySyncMachine.cpp, PrefsManager.cpp,
+         RageFile.cpp. So sections 5, 6 (preference and RageFile parts) and 13 (mode levels,
+         buffer reset, F6 level, stddev gate, sample count) hold unchanged on beta.
+  [CODE] Changed files, checked on the specific lines the findings use:
+         - Player.cpp: offset formula (beta ~2325), the "score >= TNS_W3 ->
+           AdjustSync::HandleAutosync(fNoteOffset, fStepSeconds)" gate (~2565) and
+           "pTN->result.fTapNoteOffset = -fNoteOffset" (~2636) are present and unchanged
+           in form; the sign convention in section 4 holds. Line numbers moved (~120 lines
+           up), so line references in sections 3-5 are v1.3.0 numbers only.
+         - GameState.cpp: AdjustSync::ResetOriginalSyncData() at ~331 and ~722, and
+           m_SongOptions.Assign(ModsLevel_Stage, ...GetPreferred()) at ~732: same logic as
+           v1.3.0 (13.1-13.2).
+         - ScreenDebugOverlay.cpp: F6 still assigns m_AutosyncType at ModsLevel_Song (~767)
+           and reads GetSong() (~735, 755, 759).
+         - ScreenGameplay.cpp: BeginStage still called once per stage (~456).
+         - Group.cpp/Group.h: the constructor was removed and members are initialised in
+           the loader; the m_fSyncOffset default (NULL pref -> 0, else -0.009) and the
+           Pack.ini NULL/ITG parsing are unchanged (Group.cpp ~56, 114, 116);
+           GetSyncOffset and its Lua binding remain (Group.h:67, Group.cpp:189). Also
+           removed: m_iVersion and Group::GetSongs (irrelevant here).
+         - Song.cpp, TimingData.cpp: group offset still stored in m_fBeat0GroupOffsetInSeconds
+           and added to the beat-0 offset (Song.cpp ~424-429, 476-505, 673-680;
+           TimingData.cpp ~715, ~792). Line numbers differ only.
+         - PlayerState.cpp: removed multiplayer/inventory members only; the attack rebuild
+           (13.1 exception 3) is unchanged.
+  [UNVERIFIED] The full diffs of Player.cpp, GameState.cpp, ScreenDebugOverlay.cpp,
+         ScreenGameplay.cpp, Song.cpp, TimingData.cpp and ProfileManager.cpp were not read
+         line by line; only the lines the findings depend on were checked. A change
+         elsewhere in those files that affects the sync path would not have been seen.
+  [CODE] Beta head 05a6439 is newer than the head recorded earlier in the project notes
+         (7b34bfe2ac), so the comparison is against a later commit.
+ 14.2 Simply Love upstream.
+  Upstream repo Simply-Love/Simply-Love-SM5: itgmania-release = dd06138 (the same base the
+  user's fork builds on); itgmania-beta = 649706f.
+  [CODE] On BOTH upstream branches these files are identical to the fork's version, i.e.
+         diff = 0 lines: ScreenGameplay overlay/JudgmentOffsetTracking.lua, ScreenGameplay
+         overlay/default.lua, ScreenEvaluation common/Shared/GlobalStorage.lua, Graphics/
+         ScreenEvaluationStage header.lua, ScreenTitleMenu underlay/default.lua,
+         ScreenPlayAgain underlay.lua, MusicWheelItem Song NormalPart/Unlocks.lua and
+         Favorites.lua, Scripts/SL-OperatorMenuOptions.lua. The only difference found is
+         ScreenEvaluation common/PerPlayer/Storage.lua (2 lines) between the fork and
+         upstream itgmania-beta; it is the fork's own display-meter change
+         (DisplayMeter.Number), not offset-related. SL_Init.lua initialize() and
+         InitializeSimplyLove() are the same on itgmania-beta as sections 11-12 describe.
+  [UNVERIFIED] Other upstream branches (beta, release, ddr, srpg, etc.) were not compared.
+         The engine's own pinned Simply Love is the user's fork (see INDEX), so these do
+         not matter for the user's builds.
+ 14.3 Conclusion: for the code paths this feature depends on, engine beta and upstream
+      Simply Love behave the same as v1.3.0 and the fork. [INFERRED] The design in sections
+      8-13 needs no change for beta. G8 asks the user to re-run the key in-game checks on the
+      build that will actually be used.

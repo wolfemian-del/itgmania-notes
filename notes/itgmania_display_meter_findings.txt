@@ -1,0 +1,185 @@
+ITGMANIA / SIMPLY LOVE: DISPLAYING THE MODELED RATING IN PLACE OF THE OFFICIAL METER
+=====================================================================================
+REVISION: 2026-10-13-a | file: itgmania_display_meter_findings.txt
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE; patch rebuilt 2026-10-13 (patches/sl_display_meter.patch), checked with git apply and a
+                 mock-based Lua logic test on Lua 5.1 and 5.4. NOT run in the game (I cannot run it).
+                 In-game checks: section 8.
+  VERSION BASIS: engine v1.3.0 (8a3bf8884a); Simply Love dd06138 (the commit v1.3.0 and beta pin).
+                 Beta not diffed for these files [UNVERIFIED that they are unchanged].
+  TOPIC KEY:     DifficultyModel, DisplayMeter, DifficultyDisplay pref, GetMeter, StepsDisplayList,
+                 Pack.ini DifficultyMode, IniFile.ReadFile, theme pref, memoize
+  READ WHEN:     the task is to show DifficultyModel ratings instead of (or beside) the official
+                 meter, to make that global or per-pack, or to replace the DifficultyModelCheck overlay.
+  SEE ALSO:      itgmania_difficulty_rating_writeup.txt (model, limits); claude/DifficultyModel.lua;
+                 patches/sl_display_meter.patch.
+Tags: [CODE] read in source (file given), [INFERRED] reasoned, not run, [UNVERIFIED] not determined,
+      [TESTED-MOCK] ran in a stub Lua environment here (not the game).
+Origin: user asked 2026-10-12 whether the modeled rating could replace the displayed meter (global
+toggle, maybe per pack via Pack.ini) because the check overlay covers the banner and may drop frames.
+
+CHANGES IN REVISION 2026-10-13-a (the patch was rebuilt from a clean dd06138 checkout)
+  - BUG FIXED. The earlier patch changed only one of the two "%i" format strings in the ScreenPlayerOptions
+    "Chart" row (Scripts/SL-PlayerOptions.lua, non-Edit branch kept "%i"). With Both mode the text is
+    "13 (12)", and string.format("%i", "13 (12)") raises an error, which would have broken that screen.
+    Both branches now use "%s" [TESTED-MOCK: format call with a Both string].
+  - Pack folder is now found by dropping the last TWO path components of steps:GetFilename()
+    (".../<Pack>/<Song>/<file>"), not by taking the first two. The old rule failed for AdditionalSongs
+    and absolute paths [INFERRED]. Where Pack.ini is not found the display is official.
+  - Pack.ini key matching now ignores case and spaces in the KEY. IniFile.ReadFile does not trim keys, so
+    "DifficultyMode = modeled" produced the key "DifficultyMode " and was silently ignored
+    [TESTED-MOCK: failed before the fix, passes after; CODE: 01 IniFile.lua StrToKeyVal pattern "(.+)=(.*)"].
+  - Rating does not depend on which player is joined: Steps::GetNpsPerMeasure / GetNotesPerMeasure /
+    GetPeakNps fall back to the PLAYER_1 data when fewer per-player copies exist [CODE: Steps.cpp 932-1000].
+    DifficultyModel.Rating defaults to PLAYER_1 anyway.
+
+1. SIMPLY LOVE SITES THAT DISPLAY A METER (all Lua; theme-only change) [CODE, grep of GetMeter in *.lua]
+  Song select (dance, not course):
+    BGAnimations/ScreenSelectMusic overlay/StepsDisplayList/Grid.lua:34   the 5-row grid next to the wheel;
+        passes Meter into the "Set" command. Uses SongUtil.GetPlayableSteps. Cell is 28 px wide.
+    .../StepsDisplayList/TabbedStepchartList/default.lua:99   tabbed variant (RedrawCommand).
+    .../PaneDisplay.lua:583   per-player pane "DifficultyMeter" text. It hides itself when
+        IsServiceAllowed(SL.GrooveStats.GetScores) is true (GrooveStats connected), so it may not show.
+        StepsOrTrail can be a Trail in course mode. Right-aligned at pane column 4
+        (x = WideScale(150,190)); column 3 is at WideScale(54,76) [CODE: PaneDisplay.lua 231-233].
+    .../SongSearch/default.lua:160   search result lines.
+  Gameplay:
+    BGAnimations/ScreenGameplay underlay/PerPlayer/DifficultyMeter.lua:37   (steps:GetMeter(), no nil
+        guard on steps in the original).
+  Evaluation:
+    BGAnimations/ScreenEvaluation common/PerPlayer/Upper/Difficulty.lua:61-64
+    .../Upper/nice.lua:49-56   (the "69" easter egg tests the meter string; left on the official meter).
+    .../PerPlayer/Storage.lua:58,63   copies the meter into storage.meter, which the evaluation SUMMARY
+        reads (ScreenEvaluationSummary overlay/PlayerStageStats.lua:44,155). A grep for storage.meter and
+        .meter finds no other reader [CODE]. Changing Storage.lua carries the display value to the summary.
+  Options screens:
+    Scripts/SL-PlayerOptions.lua:365,367   "Chart" row choice text on ScreenPlayerOptions (both used "%i").
+  Not changed (official value must stay): Scripts/SL-CustomScores.lua:108,141 (written to the custom
+    scores file); course-mode trail:GetMeter() sites (the model is not trained on trails).
+  Engine-drawn (not Lua): ScreenEditMenu underlay recolours the engine StepsDisplay (editMenu:GetChild(
+    "StepsDisplay")); its meter text comes from C++. The song-select StepsDisplayP1/P2 actors are
+    hibernated in metrics.ini (~1805-1806). [CODE]
+
+2. SITES THAT USE THE METER AS DATA (would disagree with a changed display) [CODE]
+  - SortMenu/default.lua:131 and SongSearch/SongSearchSettings.lua:88   the "difficulty" search filter
+    compared steps:GetMeter() == number. Both now call DisplayMeter.Matches (section 4). Both already skip
+    Edit charts.
+  - SortMenu/default.lua:231   the "Meter" sort is the ENGINE sort (SORT_METER, C++): it keeps using the
+    official meter. A chart displayed as 13 can sit in the official-12 group [INFERRED]. Not changed.
+  - ScreenSelectMusicCasual overlay/OptionRows.lua:16-33 and Setup.lua:122,228   CasualMaxMeter filters
+    and "closest meter" selection: official meter. Not changed.
+  - StepsToDisplay.lua:77   compares edit charts' meters to find the current edit; must stay official.
+  - Engine: SongCriteria meter ranges, course generation, autogen: official meter (C++).
+  - No submission uses the meter: scoreSubmit and playerLeaderboards queries carry the chart hash
+    (AutoSubmitScore.lua:177-179, 390: SL[pn].Streams.Hash); a grep for "meter" in AutoSubmitScore.lua,
+    Leaderboard.lua and SL-Helpers-GrooveStats.lua finds only LifeMeter and the word "parameters". [CODE]
+
+3. LUA CAPABILITIES THAT MATTER [CODE, engine v1.3.0]
+  - Steps:GetFilename() is bound and returns a path ending ".../<Pack>/<Song>/<file>.sm" (SL-ChartParser.lua
+    opens it directly) [CODE]. Whether it starts "Songs/", "/Songs/" or something else is not checked: the
+    patch no longer depends on that (see check 3, section 8).
+  - Lua can read files: RageFileUtil.CreateRageFile() with Open/Read/GetLine/AtEOF (RageFile.cpp
+    ~395-470); Simply Love already reads song files with it (Scripts/SL-ChartParser.lua:15).
+  - Lua IniFile.ReadFile(path) exists in _fallback Scripts/01 IniFile.lua. It returns a table keyed by
+    section, then key; values are converted to number/boolean when they look like one; blank table (and a
+    Warn) when the file cannot be opened. Differences from the engine reader (Group.cpp uses the C++
+    IniFile): the Lua version skips only lines starting with "#" (the C++ reader also skips ";", "//",
+    "--" per engine notes 7l), does not trim keys or values, and splits at the last "=" [CODE; Group.cpp 79-106].
+    The patch calls FILEMAN:DoesFileExist first (no Warn spam for packs without Pack.ini), matches the key
+    ignoring case and spaces, and trims and lower-cases the value itself.
+  - Group has NO Lua accessor for the pack folder or for arbitrary keys (Group.cpp ADD_METHOD list ends at
+    GetYearReleased; C++ Group::GetPath exists, Group.h:40, but is not bound). The engine builds the
+    Pack.ini path as <songs dir><pack dir>/Pack.ini [CODE: Group.cpp 47-54].
+  - Group.cpp reads Pack.ini only when [Group] Version is non-empty, and ignores keys it does not know
+    [CODE: fixed key list]. So an extra key is harmless to the engine. The Lua reader does not check Version,
+    so a Pack.ini without Version still drives DifficultyMode while the engine ignores the rest of that file
+    [INFERRED]. Put Version=1 in the file to keep both readers consistent.
+  - Engine route for a per-pack key (not needed now): add to the vPackfields list in Group::Group, a member,
+    a Lua binding and a docs line. Same shape as the SeriesBanner commit (36dc1925bd).
+
+4. WHAT THE PATCH DOES (patches/sl_display_meter.patch; Simply Love dd06138) [CODE, patch text]
+  Pref (theme pref, Simply Love Options screen, default Official):
+    DifficultyDisplay = Official | Modeled | Both | PerPack
+    Files: Scripts/99 SL-ThemePrefs.lua (definition), metrics.ini (LineNames + LineDifficultyDisplay),
+    Languages/en.ini (option title, explanation, four choice strings under [ThemePrefs]).
+    Other language files are untouched; THEME:GetString should fall back to en.ini for missing keys
+    [INFERRED, not checked: see check 9].
+  New file Scripts/SL-DisplayMeter.lua (global table DisplayMeter):
+    DisplayMeter.Text(steps, compact)  display string. Official meter when: mode is official; DifficultyModel
+        is missing; Rating returns nil (not dance-single, no data); steps is an Edit; course mode; steps nil
+        (returns ""). Modeled: the rating. Both: "13 (12)", or just "13" when the numbers are equal or when
+        compact=true.
+    DisplayMeter.Number(steps)  modeled number when mode is modeled/both and a rating exists, else official.
+    DisplayMeter.Matches(steps, n)  filter test: Number == n; in Both mode the official meter also matches.
+    DisplayMeter.Reset()  clears the caches.
+    PerPack: reads [Group] DifficultyMode=official|modeled|both (value case-insensitive and trimmed; key
+        case-insensitive, spaces ignored) from <pack folder>/Pack.ini, the folder being steps:GetFilename()
+        minus its last two path components. Cached per folder for the session. Missing file, missing key or
+        bad value = official. Editing a Pack.ini needs a game restart.
+    Rating cache key: filename|StepsType|Difficulty|Description. A chart edited in place and loaded again with
+        Reload Songs keeps its old cached rating until the game restarts (call DisplayMeter.Reset() to clear).
+  Edited display sites (compact = small cells show only the modeled number; wide = may show "13 (12)"):
+    StepsDisplayList/Grid.lua (compact), TabbedStepchartList/default.lua (compact), PaneDisplay.lua (wide;
+    course mode keeps Trail:GetMeter()), SongSearch/default.lua (wide), gameplay DifficultyMeter.lua
+    (compact; also adds a nil-steps guard), evaluation Upper/Difficulty.lua (compact, non-course branch only),
+    evaluation Storage.lua (Number; feeds the summary screen), SL-PlayerOptions.lua Chart row (wide; both
+    "%i" formats changed to "%s").
+  Filter sites routed through DisplayMeter.Matches: SortMenu/default.lua, SongSearch/SongSearchSettings.lua.
+  DEPENDENCY: claude/DifficultyModel.lua must already be in the theme's Scripts folder (the patch does not
+    include it). Without it every site shows the official meter.
+  Not changed: see sections 1-2 (CustomScores, nice.lua, Casual, StepsToDisplay, engine sorts, EditMenu).
+  Does NOT touch the DifficultyModelCheck overlay: remove or disable it separately (section 7).
+
+5. TESTS RUN HERE [TESTED-MOCK]
+  - git apply --check and git apply on a fresh worktree of dd06138: clean (14 files, 340 patch lines);
+    the resulting tree is identical to the tree the patch was made from.
+  - All edited .lua files parse under Lua 5.1 (the game's version) and 5.4 (lupa).
+  - 32 logic cases on DisplayMeter, run on both Lua 5.1 and 5.4, with stub Steps/GAMESTATE/FILEMAN/
+    ThemePrefs/DifficultyModel and the real _fallback IniFile.lua reading real files: official, modeled,
+    both, both-compact, equal numbers, Edit charts, nil rating, course mode, missing DifficultyModel,
+    memoization (no repeat Rating calls), Matches in each mode, the Chart-row format call with a Both
+    string, PerPack with key (CRLF line ends, spaces around "=", mixed case) / key with a bad value /
+    without key / without Pack.ini / leading-slash path / absolute path / empty or short filename.
+    All pass. This proves the logic only, not the engine bindings, the layout or the in-game
+    behaviour of GetFilename.
+
+6. RISKS
+  - Mixed scales on one screen: modeled DDR-X-scale numbers next to community-scale official numbers.
+    Motivates the per-pack setting; default is Official.
+  - Beginner/Easy slot-convention charts are the known weak spot (writeup 5.6). Edit charts are not rated.
+  - Rating 18-19 least reliable (thin data); 20 is never produced.
+  - Wheel Meter sort follows the official meter while the display follows the pref (section 2).
+  - Both mode in the pane and in the Chart row on ScreenPlayerOptions makes longer strings
+    [UNVERIFIED how they fit; the pane text has no maxwidth on widescreen].
+  - Evaluation summary and the "Storage" copy show the modeled number whenever the pref is not Official,
+    including for charts played under another setting earlier in the session [INFERRED].
+  - Cache staleness after editing a chart (section 4).
+
+7. OPEN / NEXT
+  - Frame drops: the DifficultyModelCheck overlay builds a string and calls SystemMessage on every song
+    change; the rating arithmetic is probably cheap [INFERRED, not profiled]. Time DifficultyModel.Rating
+    over a whole song's charts (os.clock) if drops persist with the overlay removed.
+  - Decide whether to convert the Casual-mode meter filters (they stay official now).
+  - If "13 (12)" is clipped in the pane, add self:maxwidth(66) to the pane meter actor for widescreen too.
+  - Beta diff of the files in section 1.
+
+8. IN-GAME CHECKS FOR THE USER (none run)
+   1. Options > Simply Love Options > "Difficulty Display" row exists with Official/Modeled/Both/Per Pack.
+   2. Official: song select, gameplay, evaluation all look as before.
+   3. Per Pack depends on steps:GetFilename(). Print it once (SM() in the grid) and confirm it ends
+      ".../<Pack>/<Song>/<file>" and that "<that folder>/Pack.ini" is the real pack file. If not, tell me
+      the exact text.
+   4. Modeled: grid and tabs show rating numbers that match the old overlay. Edit and non-dance-single
+      charts keep their official number.
+   5. Both: PaneDisplay and song search show "13 (12)"; grid, gameplay and evaluation show only "13".
+      Check that "13 (12)" is not clipped in the pane and in the Chart row of ScreenPlayerOptions, and that
+      opening ScreenPlayerOptions does not raise an error in Both mode (the fixed "%i" case).
+   6. Per Pack: add "[Group]\nVersion=1\nDifficultyMode=modeled" to one pack's Pack.ini, restart the game, and
+      confirm only that pack changes. Try "Both", "DifficultyMode = modeled" with spaces, and a bad value
+      (should act as official).
+   7. SortMenu difficulty filter and song search difficulty filter: with Modeled, typing 13 finds charts
+      displayed as 13; with Both, 12 and 13 both match the chart shown "13 (12)".
+   8. Evaluation summary screen after two songs shows the modeled meters when the pref is Modeled.
+   9. Switch the language to one other than English and confirm the new row's choices are not blank.
+  10. Frame pacing on song select with the DifficultyModelCheck overlay removed.

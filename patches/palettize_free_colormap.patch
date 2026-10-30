@@ -1,0 +1,32 @@
+From d5f05486a4235176bb09fbd4b7f62e4e8e436689 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 22:50:54 -0400
+Subject: [PATCH] RageSurfaceUtils::Palettize: free() the malloc'd colormap
+ instead of delete
+
+mediancut() allocates the colormap with malloc(); Palettize() released it
+with delete, a malloc/delete mismatch (undefined behavior; CodeQL alert
+cpp/new-free-mismatch #427). Use free(), which is also safe for nullptr.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011M5QaUAuCxRf34SxvbvdaX
+---
+ src/RageSurfaceUtils_Palettize.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/RageSurfaceUtils_Palettize.cpp b/src/RageSurfaceUtils_Palettize.cpp
+index 642ef51..474ddff 100644
+--- a/src/RageSurfaceUtils_Palettize.cpp
++++ b/src/RageSurfaceUtils_Palettize.cpp
+@@ -290,7 +290,7 @@ void RageSurfaceUtils::Palettize(
+     }
+   }
+ 
+-  delete acolormap;
++  free(acolormap);  // allocated with malloc in mediancut()
+   delete[] thiserr;
+   delete[] nexterr;
+ 
+-- 
+2.43.0
+

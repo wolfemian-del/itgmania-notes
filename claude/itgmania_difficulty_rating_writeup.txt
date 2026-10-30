@@ -1,0 +1,344 @@
+ITGMANIA: A DERIVED, SCALE-CONSISTENT DIFFICULTY RATING FROM CHART DATA
+=====================================================================
+WRITEUP | file: itgmania_difficulty_rating_writeup.txt | 2026-10-11
+Engine:  itgmania/itgmania tag v1.3.0 (8a3bf8884a). Beta not diffed
+         (head seen 7b34bfe2ac) [UNVERIFIED that the files used are unchanged].
+Theme:   Simply Love (in-game checks only).
+Source:  itgmania_difficulty_rating_notes.txt (working record, chronological);
+         this file is the organized account. Technical detail and tags kept.
+Tags:    [CODE]       read in the engine source (file and function given)
+         [OBSERVED]   output of a script the user ran on their own library
+                      (I cannot run the game or see their files)
+         [INFERRED]   reasoned from code or data, not tested
+         [UNVERIFIED] not determined
+ 
+ 
+1. QUESTION AND ANSWER
+----------------------
+Question 1. Can an objectively derived, progressively increasing difficulty
+integer (1-20) be computed from the data in a .sm/.ssc file, to harmonize
+inconsistent rating scales (DDR 1-10, Groove 1-13, DDR X 1-20, fan charts)?
+Question 2. Is it cheap enough to compute at song select or at song load?
+ 
+Answer 1. Yes, with one qualification that matters. A formula over
+cached chart statistics reproduces official DDR X-scale ratings to within
+one foot for about 94-95% of charts (mean absolute error 0.62 foot,
+song-grouped cross-validation, 5,581 dance-single charts) [OBSERVED]. But
+"objective" here means "a consistent function of the chart data, trained to
+agree with one community's scale". It does not discover a true difficulty;
+it imitates the DDR X scale and inherits that scale's quirks (section 8).
+The output range is 1-19, not 1-20: the training corpus has no label above 19,
+so 20 is deliberately unused (user decision 2026-10-10).
+ 
+Answer 2. Yes. Every input is already cached per chart in the song cache
+and exposed to Lua; the rating is a few hundred multiplications per chart
+[CODE for the cached inputs and Lua methods; INFERRED for the cost, not
+timed]. It runs as a Lua script in a theme with no engine change.
+A working implementation exists and was verified in the game (section 7).
+ 
+ 
+2. WHAT THE ENGINE ALREADY PROVIDES  [CODE unless tagged]
+---------------------------------------------------------
+Steps::CalculateStepStats (Steps.cpp ~324) computes, once per parsed chart:
+radar values, tech counts (step-parity foot-path search), per-measure note
+and NPS arrays, peak NPS, and the GrooveStats hash. All are written to the
+per-song cache file (Cache/Songs/<song dir, "/" -> "_">, SSC tag syntax:
+#RADARVALUES, #TECHCOUNTS, #NPSPERMEASURE, #NOTESPERMEASURE, #PEAKNPS,
+#GROOVESTATSHASH, ...), so song select reads them back without re-parsing.
+FILE_CACHE_VERSION = 232 (Song.cpp:69); the engine wipes the cache only on a
+version mismatch (SongCacheIndex::ReadCacheIndex ~87-110) and never prunes
+orphaned entries, so cache files of deleted packs persist [CODE; also seen
+by the user].
+ 
+Lua access (Steps.cpp ~1024-1076, ~1235-1261): GetRadarValues():GetValue(
+"RadarCategory_X"), GetNpsPerMeasure, GetNotesPerMeasure, GetPeakNps,
+GetTechCounts():GetValue("TechCountsCategory_X"). GetNpsPerMeasure,
+GetNotesPerMeasure and GetPeakNps are registered under a comment calling them
+experimental ("may change in the future until we actually document them");
+GetTechCounts is not in LuaDocumentation.xml either [CODE]. A future release
+could rename them.
+ 
+Radar definitions (NoteDataUtil.cpp ~905-1037): Stream = (taps/s)/7;
+Voltage = (peak notes in an 8-beat window / 8 x average beats/s) / 10;
+Air = jumps/s; Freeze = holds/s; Chaos = rows of 12th-or-finer/s x 0.5.
+The values are not clamped, so Stream can exceed 1 [CODE]. They divide by
+song length, not active chart time [INFERRED consequence: long idle intros
+or outros read low].
+MeasureInfo (MeasureInfo.cpp): notes and NPS per 4-beat measure; a row counts
+as one note however wide, so jumps and brackets do not raise NPS [CODE;
+INFERRED consequence: NPS undercounts jump-heavy density].
+ 
+ 
+3. THE BUILT-IN ESTIMATOR, Steps::PredictMeter
+----------------------------------------------
+[CODE, Steps.cpp ~263-286] meter = 0.775 + 10.1*Stream + 5.27*Voltage
+ + 2.86*Chaos - 0.905*Air - 1.10*Freeze + offset(Beginner/Easy -0.877,
+ Hard/Challenge +0.722, Medium/Edit 0) - 6.35*Stream*Voltage
+ - 2.58*Chaos^2, floor 1. Used by TidyUpData only when a file's meter is < 1
+(via int()), by ScreenEdit ("Predicted Meter"), and by Lua.
+Properties: it depends on the chart's own difficulty label; the
+Stream*Voltage term makes it non-monotone; it saturates near 11 [CODE plus
+arithmetic on invented inputs]. Provenance of the coefficients cannot be
+recovered (git history reaches only the import commit) [CODE].
+ 
+Measured on the user's library (5,608 dance-single charts, Wii and fan SMM
+charts excluded, song-grouped CV, labels >= 19 treated as "19 or harder")
+[OBSERVED]:
+                              MAE   RMSE  exact  within-1  rank corr
+ PredictMeter as shipped      3.43  4.01   7.4%   21.1%    0.977
+ PredictMeter, calibrated     0.79  1.08  40.3%   87.1%    0.976
+ Fitted model, calibrated     0.62  0.78  49.5%   94.3%    0.985
+(The fitted-model row is the deployed 16-feature model on a slightly
+different corpus, which included GRAND PRIX; see section 5.)
+As shipped, its mean prediction is 5.4 at official level 9, 8.1 at 13, 9.7 at
+16, then falls (9.57 at 17, 9.32 at 18, 8.54 at 19); its maximum anywhere is
+10.79; 100% of 1,805 charts rated 12+ are predicted below 11.
+Reading [INFERRED]: most of its failure is scale compression, which a
+monotone calibration alone removes (87% within one foot). It still cannot
+separate levels 16-19 (calibrated values stay near 15-16; calibrated MAE
+1.33 / 2.77 / 5.05 at levels 17 / 18 / 19, against 0.4 for the fitted model),
+because its output turns down at the top. Its ordering is nearly as good as
+the new model's (0.976 vs 0.985).
+ 
+ 
+4. METHOD
+---------
+4.1 Corpus. Officially rated DDR charts on the DDR X scale, read from the
+user's song cache. 11 packs, 5,581 dance-single charts, 1,129 songs after
+dropping Edit charts and collapsing exact duplicates:
+ [2009] DDR X2 (PS2), [2010] DDR X2 (AC), [2011] DDR X3 VS 2ndMIX,
+ [2013] DDR (AC), [2014] DDR (AC), [2016] DDR A (AC), [2019] DDR A20 (AC),
+ [2020] DDR A20 Plus (AC), [2021] DDR GRAND PRIX (PC), [2022] DDR A3 (AC),
+ [2024] DDR World (AC).
+Label counts, level 1..19: 82, 431, 490, 362, 341, 323, 395, 330, 332, 333,
+361, 414, 316, 270, 274, 229, 171, 115, 12. Level 19 is thin (12).
+Excluded: DDR II (Wii) (312 charts), "[2009] DDR X (PS2, JP)" (4 fan SMM
+charts), and two DDR X packs the user removed because their step ratings
+were inflated (can be reintegrated; they would not help, see 5.3).
+Wii exclusion rationale [OBSERVED]: its residual spread was 1.57 foot
+against 0.6-1.0 for every other pack, 24% of its charts missed by more than 2
+feet (3% elsewhere), and all 7 re-rated duplicate groups (identical notes and
+BPMs, different meters, e.g. Dance Partay Medium 7 vs 9) involved it.
+Probable cause: a different rating scale or chart style [INFERRED].
+ 
+4.2 Extraction. extract_chart_features.py reads Cache/Songs/* (no game
+needed) and writes one row per chart: label, radar values, tech counts,
+measure-derived features, GrooveStats hash and duplicate-group columns.
+Packs are selected with a packs file; duplicates are detected by hash.
+Real run: 5,557 cache files, 0 failures, all hashes valid [OBSERVED].
+ 
+4.3 Features (16 in the deployed model), all derived from cached values:
+ log_rows            ln(total note rows)
+ mean_nps_active     mean NPS over non-empty measures
+ peak_nps            cached peak NPS
+ p90_nps_active      90th percentile NPS over non-empty measures
+ sust_nps_8/16/32    highest mean NPS over any 8/16/32 consecutive measures
+ radar_Stream, _Voltage, _Air, _Freeze, _Chaos
+ active_frac         non-empty measures / all measures
+ mines_per_row, holds_per_row (holds+rolls), jumps_per_row
+ (hands_per_row is also computed; its weight is 0.)
+Tech counts were tested and dropped (section 5.4).
+ 
+4.4 Model. Ridge regression (alpha 3) on standardized features, then:
+ - Censoring: labels >= 19 mean "19 or harder"; a prediction above 19 on those
+   charts is not an error and does not pull the fit down (Tobit-style
+   iteration in the fit; one-sided miss in the metrics).
+ - Monotone calibration: isotonic regression of the raw model value onto the
+   label, sampled to about 50 knots, linear between knots. It removes the
+   S-shaped bias a straight line leaves (section 5.2). Learned from
+   out-of-fold predictions; its reported accuracy uses nested cross-validation
+   so it never sees its own held-out labels.
+ - Rating = clamp(round(calibrated value), 1, 19); 20 unused.
+Evaluation: 5-fold cross-validation with whole songs held out together
+(title+artist). Songs, not packs, because packs are releases and a held-out
+release removes most of the top-level charts from training [INFERRED].
+Duplicates (same hash, same meter) are collapsed; re-rated duplicates are
+excluded and listed.
+ 
+4.5 Outlier handling. A Huber (robust) fit is always compared with ridge: they
+agree (MAE 0.70 both, mean prediction difference 0.03 foot), so outliers are
+not distorting the fit [OBSERVED]. Large misses are listed, not deleted.
+ 
+ 
+5. RESULTS  [OBSERVED, user-run, 2026-10-10/11]
+-----------------------------------------------
+5.1 Headline (song-grouped CV, deployed 16-feature model, 5,581 charts):
+ raw ridge              MAE 0.70   exact 43.1%   within-1 91.6%   rho 0.985
+ calibrated (deployed)  MAE 0.62   exact 49.5%   within-1 94.3%   rho 0.985
+ with tech features     MAE 0.61   exact 49.2%   within-1 94.9%   rho 0.985
+ gradient boosting      MAE 0.55   exact 55.2%   within-1 96.4%   rho 0.988
+Per-fold spread of MAE is about 0.02, so the 0.62 vs 0.61 difference is noise.
+Label noise: official ratings themselves are rounded integers rated by
+people, so a floor of roughly +-0.5 to 1 foot is plausible [INFERRED]; the
+model is close to it.
+Gradient boosting is about 0.07 foot better, so a small interaction effect
+exists. It cannot be ported to Lua easily, so the formula was kept.
+ 
+5.2 Bias by level. The raw linear model was too low at 10-14 (-0.63 at 12) and
+too high at 1-7 and 16-18 (+0.86 at 18). After calibration the bias is
+within +-0.41 at every level; calibrated MAE is 0.4-0.8 by level, lowest at
+the top (0.37-0.45 at 17-19) and highest around 8-10 (0.7-0.8). Calibration
+slightly worsens 5-9 against the raw fit because it pulls values toward the
+middle [INFERRED].
+ 
+5.3 Corpus size. The learning curve is flat: MAE 0.724 at 446 training charts,
+0.707 at 4,465. More charts of this kind will not help the linear model;
+the limit is the features and the labels. 500-1,000 charts is already
+nearly as good [OBSERVED].
+ 
+5.4 Features that matter. By standardized weight: log_rows (+2.1),
+mean_nps_active (+2.0), sust_nps_32 (-0.9, collinear with the other NPS
+terms), peak_nps (+0.55), radar_Stream (+0.4), then small contributions.
+Tech counts (crossovers, footswitches, jacks, brackets, doublesteps...) each
+had a standardized weight <= 0.06 and removing them changed nothing
+measurable (MAE 0.62 vs 0.61). So on DDR charts the foot-parity result adds
+nothing [OBSERVED]. For ITG-style tech charts this is untested [UNVERIFIED].
+ 
+5.5 Pack consistency. After excluding Wii, no pack's residual spread stands out
+(0.87-0.98). Pack offsets (label minus prediction): GRAND PRIX (PC) +0.50 to
++0.52 (flagged; n=157), DDR (AC) 2014 -0.26, DDR World +0.16 to +0.21 (n=1,168,
+SE 0.03), others |offset| < 0.2. The GRAND PRIX offset sits in Hard charts
+at levels 9-12 (+0.77 on 38 charts; Hard and Challenge at 9-16: +0.77 vs
++0.14 elsewhere). Excluding GRAND PRIX changed nothing else (MAE 0.61, other
+offsets unchanged). It may reflect different rating practice for that
+release or an unusual 38-song sample [INFERRED].
+ 
+5.6 Largest misses (always listed in outliers.csv). Two kinds [OBSERVED]:
+ - Beginner/Easy charts whose official rating follows slot convention, not
+   density (Heavens and the Earth Beginner rated 2, predicted -1.6; LET'S CHECK
+   YOUR LEVEL! Beginner rated 1, predicted 4.5).
+ - Hard/Medium charts rated 2.5-3.5 above prediction (Natsumatsuri, 勿忘,
+   Small Steps, Hoping To Be Good, THE REASON). Their difficulty probably comes
+   from patterns the cached features do not capture [INFERRED].
+Adding the slot name as a feature was considered and dropped: after
+calibration the mean residual for every slot is within +-0.2 and MAE is
+similar across slots (0.51-0.66) [OBSERVED].
+ 
+ 
+6. THE DEPLOYED MODEL
+---------------------
+File: DifficultyModel.lua, generated by make_lua_rating.py from the model.json
+that fit_difficulty_model.py writes (so no number is typed by hand). Fit on
+5,581 charts (v2, --no-tech, --censor-top 19, song-grouped, excluding Wii and
+DDR X (PS2, JP)). The deployed files are kept in project knowledge as
+claude/DifficultyModel.lua and claude/difficulty_model_notech.json (full
+precision; the JSON also holds the fit options and CV scores).
+ raw = b0 + sum(coef_i * feature_i), b0 = -9.0434
+ log_rows +2.96475 | mean_nps_active +1.12324 | sust_nps_32 -0.42635
+ peak_nps +0.17563 | radar_Stream +1.57998 | p90_nps_active +0.10939
+ radar_Freeze +1.64514 | sust_nps_8 +0.09667 | radar_Voltage -0.73547
+ active_frac -3.48734 | sust_nps_16 +0.07227 | mines_per_row +1.54146
+ radar_Air +0.68849 | jumps_per_row +1.84460 | radar_Chaos +0.19897
+ holds_per_row -0.47270 | hands_per_row 0
+ (5-decimal rounding of the report; the generated Lua uses full precision.)
+Calibration knots (raw -> rating, linear between, flat outside):
+ -2.0->1.17  0.0->1.17  0.5->1.36  1.0->1.70  1.5->1.94  2.0->2.22
+ 2.5->2.42  3.0->2.83  3.5->3.29  4.0->3.73  4.5->3.90  5.0->4.46
+ 5.5->5.15  6.0->5.79  6.5->6.28  7.0->6.72  7.5->7.29  8.0->7.81
+ 8.5->8.67  9.0->9.07  9.5->9.88  10.0->10.41  10.5->10.87  11.0->11.43
+ 11.5->12.00  12.0->12.42  12.5->12.83  13.0->13.41  13.5->13.83
+ 14.0->14.50  14.5->14.59  15.0->15.06  15.5->15.38  16.0->15.85
+ 16.5->16.41  17.0->16.51  17.5->17.00  18.0->17.26  18.5->17.56
+ 19.0->17.80  19.5->17.95  20.0->18.03  20.5->18.14  21.0->18.19
+ 21.5->18.94  22.0->19.00  24.0->19.00
+The top knots rest on few charts (115 at level 18, 12 at level 19) and the
+step from 18.19 to 19.00 between raw 21 and 22 is an artifact of isotonic fit
+at the censored top [INFERRED]. Treat ratings 18-19 as the least reliable.
+ 
+ 
+7. IMPLEMENTATION AND VERIFICATION
+----------------------------------
+7.1 DifficultyModel.lua defines a global DifficultyModel:
+ DifficultyModel.Rating(steps [, pn [, opts]]) -> rating, raw, calibrated
+   (or nil, reason). Rates dance-single only unless opts.any_type is set.
+ DifficultyModel.Features(steps [, pn]) -> feature table.
+Place it in a theme's Scripts folder: each theme's Scripts/*.lua (and the root
+Scripts folder) run at theme load [CODE, ThemeManager.cpp ~485-530]. Written
+for Lua 5.1 (the engine's). Returns nil with a reason when the chart has no
+measure data or an unknown radar value, rather than guessing.
+7.2 DifficultyModelCheck.lua is an overlay actor for Simply Love's
+ScreenSelectMusic overlay that shows, on each song change, the official meter
+and the model's rating (plus raw and calibrated values) for each dance-single
+chart. Load with LoadActor("./DifficultyModelCheck.lua") in the overlay's
+default.lua.
+7.3 Verification status:
+ - Generated Lua vs the Python formula on 40 mock charts under a standalone
+   Lua interpreter: maximum difference 4e-15, 0 rating mismatches [tested by
+   me; not the game].
+ - In the game, on the user's library: the overlay works, and the in-game
+   values equal apply_model.py --lookup output [OBSERVED, user-reported
+   2026-10-11]. I did not see the game.
+7.4 Cost [INFERRED, not timed]: per chart, one pass over the measure arrays
+plus a sort of the non-empty NPS values and a 50-knot interpolation. On a
+cached load nothing else is computed. A theme should rate each chart once and
+keep the result in a table rather than recompute per wheel item.
+ 
+ 
+8. LIMITS AND WARNINGS
+----------------------
+a) Imitation, not truth. The rating reproduces the DDR X scale; where DDR X
+   mis-rates a chart (slot-convention Beginners, Hard charts hard for reasons
+   outside the features), the model inherits the error [INFERRED].
+b) Top end. Levels 17-19 are supported by 171, 115 and 12 charts. The
+   corpus has nothing above 19, so the model cannot place a chart above 19
+   and 20 is never output. A "20" would have to be extrapolation or a
+   rescaling, neither validated.
+c) Other content. Only DDR-style dance-single charts were trained and tested.
+   ITG/fan charts with heavy footwork, stops, warps, speed gimmicks or odd
+   timing may be mis-rated: the features do not see stops/warps, mine
+   placement (counted only), hold-footwork interactions, or when in the chart
+   the hard parts occur. Doubles and other step types need their own fit.
+d) Cached-feature caveats in section 2: NPS counts a row once; radar rates
+   divide by song length not active time; 4/4 measures assumed.
+e) Unstable API. The three measure/peak Lua methods are experimental in the
+   engine and could change in a release [CODE].
+f) The step-parity result is a heuristic and its possible divide-by-elapsed-
+   time defect (StepParityCost.cpp ~448; no guard seen) was not tested; since
+   the deployed model does not use tech counts it does not affect the rating
+   [INFERRED].
+g) Version. Everything here applies to v1.3.0 and the user's cache as of
+   2026-10-10; I did not diff the beta.
+h) Everything under [OBSERVED] depends on the user's library and scripts; I
+   could not rerun it independently.
+ 
+ 
+9. REPRODUCTION (Windows PowerShell; pandas, numpy, scipy, scikit-learn)
+------------------------------------------------------------------------
+ 1. python extract_chart_features.py "<ITGmania>\\Cache" features.csv
+      --packs-file packs.txt        (see --list-packs to build packs.txt)
+ 2. python fit_difficulty_model.py features.csv fit_out
+      --exclude-pack "DDR II (Wii)" --exclude-pack "DDR X (PS2, JP)"
+      --censor-top 19 --group-by song --no-tech [--compare-gbm]
+ 3. python make_lua_rating.py fit_out\\model.json DifficultyModel.lua
+ 4. Copy DifficultyModel.lua to <theme>\\Scripts\\ and
+    DifficultyModelCheck.lua to <theme>\\BGAnimations\\ScreenSelectMusic overlay\\,
+    add the LoadActor line, restart the game.
+ 5. Compare: python apply_model.py features.csv fit_out\\model.json
+      --lookup "song title"
+ 6. Built-in estimator comparison: python predict_meter_check.py features.csv
+      --calibrate --exclude-pack "DDR II (Wii)" --exclude-pack
+      "DDR X (PS2, JP)" --censor-top 19
+Scripts: extract_chart_features.py, fit_difficulty_model.py (v2),
+make_lua_rating.py, apply_model.py, predict_meter_check.py, DifficultyModel
+Check.lua, itgmania_cache_format_spec.txt.
+Note: a Windows PowerShell session that printed nothing from
+make_lua_rating.py worked after a fresh PowerShell was started; the cause was
+not found [UNVERIFIED].
+ 
+ 
+10. OPEN ITEMS
+--------------
+- Test on non-DDR charts (ITG/fan packs). Needs a trusted corpus on a stated
+  scale; the model's tech-count irrelevance is unproven there.
+- A scale for 20 (rescale or extrapolate) if wanted; currently unused.
+- Decide whether to keep GRAND PRIX (negligible effect either way).
+- Pinned option, not started: player-outcome decimals (3icecream) as finer
+  within-level targets. Limit: decimals stay inside the official level, so
+  they cannot expose cross-level mis-ratings; method and terms of use of that
+  table not checked (notes section 10).
+- Richer features if more accuracy is wanted (boosting beat the linear model
+  by 0.07 foot; patterns, stops/warps, timing of hard sections).
+- Diff the relevant files on the beta before relying on them for a later
+  release; check the experimental Lua methods still exist.
+- A possible engine-side version (new cache tag, FILE_CACHE_VERSION bump) is
+  described in the notes, section 4; not needed for the Lua approach.

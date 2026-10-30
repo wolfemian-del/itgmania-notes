@@ -1,0 +1,449 @@
+ITGMANIA COURSE (.crs) FORMAT - REFERENCE FROM SOURCE (supported / unsupported behaviour)
+REVISION: 2026-10-30-j | file: notes/itgmania_course_format_reference.txt | prefix: cref
+
+FILE STATUS
+  Status:     ACTIVE. Read-only code analysis plus one synthetic parser test. Nothing built, nothing run in game.
+  Basis:      engine v1.3.0 8a3bf8884a (all [CODE] line numbers). Beta 26d81c1a6f compared (section 15).
+  Topic key:  cref
+  Read when:  writing or debugging .crs files; answering "does tag/mod X work?"; building user docs for courses.
+  See also:   course (notes/itgmania_course_builder_findings.txt) 3, 5.3, 10, 12 (builder script, fail handling);
+              this file SUPERSEDES course:5.3 for #SONGSELECT (escapes work there, 6.3) and adds to course:10.1.
+  Tags:       [CODE] read in source (file:line, v1.3.0)   [INFERRED] reasoned from code, not run
+              [TESTED] synthetic test run by Claude on REAL source text (section 2)   [UNVERIFIED] not determined
+              [OBSERVED] user-run in game. Claude cannot run the game.
+
+1. ANSWER
+  The code settles parsing and semantics for essentially every tag and mod string; it cannot settle what a theme
+  (Simply Love) does on top, or visual results. Headline findings:
+  F1. The three #MODS layouts in Docs/CourseFormat.txt (":" separators, repeated or nested) produce NO attacks and
+      NO log message. Only the KEY=VALUE form works (TIME=..:LEN=..:MODS=..), which the shipped example
+      "Forced Modifiers (Advanced).crs" and the community guides use. [TESTED 7.1, CODE]. This alone can explain
+      "#MODS does nothing" reports from people following the engine doc. Whether it explains the Reddit comment is
+      UNVERIFIED (could not read it, 14).
+  F2. Per-entry mods (4th field of #SONG) work through the same attack machinery; user test of "failoff" showed they
+      apply (course:12.7). Timed #MODS use the same machinery; read-through says they work with the "=" syntax
+      [INFERRED, not run; checks M1-M4].
+  F3. Full mod vocabulary is enumerable (section 8): 235 literal PlayerOptions tokens, 11 numbered families, speed
+      forms, plus 15 SongOptions tokens. Unknown tokens in #MODS: warned at load (log + dialog). In #SONG mods: no load-time warning, but a log line
+      "Attempted to load a non-existing mod '<x>' for the Player. Ignoring." when the string is applied [OBSERVED M7].
+  F4. Some mods parse but cannot take effect from a course because the engine reads them at Stage or Preferred level
+      (life type, visual delay; section 9.3).
+  F5. #STYLE is never read; #METER takes Regular/Difficult, not Medium/Hard; several documented statements are wrong
+      (section 13).
+  F6. Cached courses lose some #SONGSELECT criteria on the second load (GENRE always; DURATION/BPMRANGE when the
+      minimum is 0) because the cache writer disagrees with the loader (11.3) [CODE; written-cache side OBSERVED 2026-10-30 (M6); selection effect OBSERVED (M6b)].
+  F7. #SONGSELECT came from PR #173 (commits Nov 2023 - Mar 2024, author Michael Votaw; first-release tag not checked);
+      the PR's own doc text is in Docs/CourseFormat.txt and is mostly accurate for selection keys (6).
+
+2. METHOD AND LIMITS
+  - Read CourseLoaderCRS.cpp, CourseWriterCRS.cpp, Course.cpp, Trail.cpp, Attack.cpp, PlayerState.cpp,
+    PlayerOptions.cpp (FromString/FromOneModString), SongOptions.cpp, CourseUtil.cpp, MsdFile.cpp, SongUtil.cpp
+    (SongCriteria::Matches), ScreenGameplay.cpp (SetupSong), Player.cpp (ApplyWaitingTransforms), LifeMeter*.cpp.
+  - Parser test harness: the REAL text of MsdFile::ReadBuf (+AddParam/AddValue/ReadFromString/GetParam),
+    RageUtil do_split/split(std::string)/Trim, StdString CompareNoCase and CourseLoaderCRS::ParseCourseMods was cut
+    out of the v1.3.0 source with sed (line ranges in tools/course/crs_mods_parser_test.sh) and compiled with stubs
+    for logging, Attack, StringToFloat and WarnOnInvalidMods (records its argument). The driver loop that mimics
+    LoadFromMsd lines 129-141 (attach pending attacks to the next #SONG) is re-typed, not extracted.
+  - Mod vocabulary extracted mechanically from PlayerOptions.cpp 768-1521 (script in the same tools folder).
+  - NOT done: building the engine, running any course, reading Simply Love Lua for course behaviour, the Reddit
+    thread, PR #173 discussion (14).
+
+3. FILE-LEVEL SYNTAX (MsdFile::ReadBuf, MsdFile.cpp 31-150)  [CODE]
+  - A value is "#NAME:param:param;" . Tag names are matched case-insensitively by the loader.
+  - Text outside "#...;" is ignored, so the "--" documentation lines in CourseFormat.txt are harmless.
+  - "//" starts a comment to end of line EVERYWHERE, also inside a value (so "//" cannot appear in a title/path).
+  - A "#" that is the first non-blank character of a line while a value is open ends that value (missing-";" recovery).
+  - ":" and ";" end a parameter; ";" ends the value. Parameters are NOT trimmed (newlines/tabs inside a nested
+    layout stay in the text), except the recovery case.
+  - Backslash: courses are read with unescape OFF (CourseLoaderCRS.cpp 75, 220). The backslash stays in the string and
+    only protects the next character from acting as a control character. So "#COURSE:Foo\: Bar;" gives the title
+    "Foo\: Bar" (backslash visible) [CODE read, INFERRED display]. Unescaping is done only inside #SONGSELECT lists (6.3).
+  - Consequence: ":" ";" "#" cannot be used in #COURSE/#DESCRIPTION/#SONG names; an unescaped ":" truncates the field.
+
+4. HEADER TAGS (CourseLoaderCRS.cpp LoadFromMsd 79-224)
+  tag                  effect / status
+  #COURSE:t;           title (field 1 only). WORKS
+  #COURSETRANSLIT:t;   WORKS
+  #SCRIPTER:t;         WORKS
+  #DESCRIPTION:t;      WORKS
+  #REPEAT:x;           ENDLESS if the lowercased value CONTAINS "yes" ("yes", "YES", "yesterday"). Any other value: no effect.
+  #BANNER:p; #BACKGROUND:p;  paths (relative to the course folder, resolved later). WORKS [path rules not read]
+  #LIVES:n;            max(n,0). n>0 makes an ONI (battery) course; ScreenSelectMusic.cpp 1317-1325 then sets battery
+                       with n lives (course:10.2 correction). The documented "maximum number of lives" is the real meaning.
+  #GAINSECONDS:s;      float, stays in force for EVERY later #SONG until changed (variable never reset, 83/112/140);
+                       #SONGSELECT does not use it (152). First entry gain>0 and no #LIVES -> SURVIVAL.
+  #METER:n;            custom meter for the Regular (Medium) course difficulty. WORKS
+  #METER:Name:n;       Name must be Beginner, Easy, Regular, Difficult, Challenge, Edit (g_CRSDifficultyNames, line 33).
+                       "Medium"/"Hard" are INVALID here (logged, skipped) although CourseFormat.txt lists them. TRAP:
+                       #SONG's difficulty word "difficult" means the MEDIUM chart slot (Difficulty.cpp 66); here
+                       "Difficult" means the Hard course difficulty.
+  #MODS: ...;          timed attacks, section 7.
+  #SONG: ...;          section 5.      #SONGSELECT: ...;  section 6.
+  #STYLE:..;           NOT READ (course:10.3). Reason: the "ignore" branch (lines 156-161) is "!A || !B || !C", true
+                       for every name, so later branches (#RADAR cache read, #STYLE, unknown-tag log) never run.
+                       Also: typos in tag names are never logged; cached #RADAR lines are not read back. [CODE, same on beta]
+  #DISPLAYCOURSE/#COMBO/#COMBOMODE: ignored by design (and so is everything else).
+  Course type (Course.cpp 199-209): REPEAT -> ENDLESS; else lives>0 -> ONI; else first entry gain>0 -> SURVIVAL;
+  else NONSTOP. SURVIVAL and ONI both use PLAY_MODE_ONI.
+
+5. #SONG:<song>:<chart>:<mods>;  (ParseCourseSong 387-555)  [CODE; most of this is course:10.4]
+  field 1: Pack/Song (either slash), bare folder or title, "*", "Pack/*", BEST<n>, WORST<n>, GRADEBEST<n>, GRADEWORST<n>.
+           Missing song -> entry skipped, course flagged incomplete (pref HideIncompleteCourses, default false, hides it).
+  field 2: difficulty word (old-style synonyms, Difficulty.cpp 55-77) or meter "lo..hi" / "n" (official METER).
+           Invalid text -> 3..6 and a log line.
+  field 3: comma list. Four keywords are removed and acted on: showcourse, noshowcourse, nodifficult, awardN
+           (needs length > 5, so a bare "award" is just an unknown mod; award0 = gain 0 lives). Everything else
+           is stored as the entry's mod string (sections 8, 9). Not validated at load; unknown tokens only reach a
+           trace line at play time.
+  Pending #MODS attach to the entry; GOTCHA: if the #SONG fails to resolve, "continue" skips attacks.clear() so
+  the pending timed attacks attach to the NEXT entry that resolves (lines 131-142) [CODE].
+  Random entries: "*" and "Pack/*" are secret (title hidden) unless showcourse. Selection RNG is seeded per round:
+  GAMESTATE->m_iStageSeed + hash(course title) (Course.cpp 537), so the same course looks the same within a round.
+  Same song twice in a row is removed from the candidate list when other candidates exist (602-608).
+  Chart choice: ALL charts matching the entry's steps criteria are candidates and one is picked with RandomInt
+  (Course.cpp ~633, mappedSongs[RandomInt(..)]) [CODE]. With a meter range such as 1..20 that is any chart of the song, so
+  the difficulty can differ between courses and rounds [OBSERVED 2026-10-30: M01 easy+hard, M02 hard+medium for the same
+  two songs]. A named difficulty (Easy ...) restricts the candidates. Correction: an earlier reply said the first chart in
+  the list is used (SongUtil::GetOneSteps); that is not the path courses take.
+  Course difficulty shifting (Course.cpp 640-710): for non-Regular course difficulties the chart slot is shifted
+  unless nodifficult (course:3).
+
+6. #SONGSELECT:KEY=value:KEY=value...;  (ParseCourseSongSelect 557-703)  [CODE]
+  6.1 Every ":"-piece must split (escape-aware) into exactly two parts at "=", else the WHOLE ENTRY is skipped with a
+      log line. So an unescaped "=" in a value (e.g. inside MODS) skips the entry. Unknown key: logged, ignored, the
+      entry continues. Keys are case-insensitive.
+  6.2 Keys: TITLE GROUP ARTIST GENRE (comma lists) | DIFFICULTY (comma list) | METER=lo-hi | BPMRANGE=lo-hi |
+      DURATION=lo-hi | SORT=name,index | GAINLIVES=n | GAINSECONDS=n | MODS=list. A key given twice appends.
+  6.3 Escapes: TITLE/GROUP/ARTIST/GENRE items are split on unescaped "," and passed through SmUnescape, so \, \= \: \;
+      \# \\ work there (PR #173 added this). DIFFICULTY, SORT, MODS values are not unescaped.
+  6.4 Matching (SongUtil.cpp SongCriteria::Matches 50-139): GROUP exact and CASE-SENSITIVE (unlike #SONG's Pack/ part);
+      TITLE exact against folder name, #TITLE or #TITLETRANSLIT (not subtitle); ARTIST against #ARTIST or
+      #ARTISTTRANSLIT; GENRE exact on #GENRE; BPMRANGE uses displayed BPMs and needs min >= lo AND max <= hi;
+      DURATION compares the song's music length; locked/disabled and tutorial songs are excluded.
+  6.5 Numbers: ParseRangedValue splits on "-", requires first <= last, accepts decimals but METER is cast to int
+      (8.9-12 -> 8-12). A single value "8" means 8-8. Docs say "whole numbers only" for BPM/DURATION; the code
+      accepts decimals. GAINSECONDS is read with StringToInt (fraction dropped); GAINLIVES int.
+  6.6 DIFFICULTY: invalid names are logged and skipped; if all are invalid the entry has no difficulty filter.
+  6.7 MODS=: keywords showcourse/noshowcourse/nodifficult only (NO award; use GAINLIVES). Rest = mod string as in #SONG.
+  6.8 If no song matches, the entry is skipped (documented). #MODS before it attach to it.
+
+7. #MODS (timed attacks)  (ParseCourseMods 340-385)  [CODE + TESTED]
+  7.1 Syntax that works. Each ":"-piece is split at "=": TIME=s, LEN=s, END=s, MODS=list. A piece WITHOUT "=" is
+      skipped silently (no log). Results of the synthetic run (real ReadBuf and ParseCourseMods text):
+        "=" form, LEN or END ........................ attack(s) created
+        several groups in one #MODS ................. all created
+        docs format 1 "#MODS:TIME:0.500:LEN:0.500:MODS:2x;" ........ 0 attacks, no log
+        docs format 2 (nested, ":" separators) ...................... 0 attacks, no log
+        docs format 3 (nested with END, ":") ........................ 0 attacks, no log
+        CourseWriterCRS cache format (nested, "=", ":" between groups) ... 2 attacks (cache round trip OK)
+  7.2 Group rules: a "MODS=" piece completes a group using the TIME/LEN/END seen so far in the same #MODS.
+      TIME and LEN PERSIST into the next group (a second group may omit LEN and inherits it); END is cleared after
+      use. Key order matters: MODS before TIME/LEN gives start=-10000 (unset) and len 0 -> never active.
+      END converts to LEN = END - TIME. LEN <= 0: logged ("nonpositive length") and set to 0 (attack never active).
+      Negative TIME clamps to 0. Keys are trimmed and case-insensitive; values are not trimmed (mod string keeps
+      trailing spaces; harmless). A mod string containing "=" is cut at the "=" ("foo=bar" -> "foo").
+  7.3 A #MODS applies to the NEXT #SONG/#SONGSELECT only; one with no following entry is dropped; one after the entry it
+      was meant for applies to the following entry (TESTED).
+  7.4 Validation: each mod string goes through CourseUtil::WarnOnInvalidMods (CourseUtil.cpp 374): tokens accepted by
+      neither PlayerOptions nor SongOptions are logged ("Error processing ..."). Warning only; the attack is kept.
+      Not applied to #SONG mods.
+      [OBSERVED 2026-10-30, M7, user's Windows run] Load of an uncached course: log "Error processing 'x' in 'x'" (the
+      message prints the token, then the whole comma list it came from) AND a modal dialog [INVALID_PLAYER_OPTION_WARNING],
+      shown once at load. #SONG mod 'cref_bad_song_token': no load-time message (as predicted). BUT PlayerOptions::FromString
+      (PlayerOptions.cpp 753-766) logs "Attempted to load a non-existing mod '%s' for the Player. Ignoring." at Trace level
+      for every unknown token whenever a mod string is applied. Observed for BOTH tokens: 5 pairs in one burst when the
+      course list was built (about 5 = one per course difficulty [INFERRED]) and again 1 pair when the course was started.
+      So "silently ignored" was wrong; correct: no dialog and no load-time warning for #SONG tokens, but logged when applied.
+      The same run logged "Launch attack 'cref_bad_mods_token' against P1 at 1.000000" at gameplay start [OBSERVED]:
+      a #MODS TIME=1 entry in "=" form does create and launch an attack.
+  7.5 Time base [CODE, base INFERRED]: TrailEntry attacks go to ScreenGameplay m_asModifiersQueue[songIndex]. SetupSong
+      (1223-1232) launches them for that song; GameState::ResetMusicStatistics runs at the start of LoadNextSong
+      (1251) and resets the position to 0 (SongPosition.h 42). PlayerState::Update enables an attack while
+      start < musicSeconds < start+len (PlayerState.cpp 74-77). So TIME is seconds of music time from the start of
+      THAT entry's song, not cumulative over the course. (An old FFR guide says timing "must continue across
+      songs"; that does not match this code.)
+  7.6 TIME=0 is special: SetupSong turns start==0 into "start now" (1226) and LaunchAttack stores the current music
+      seconds (0 after the reset) as the start, so TIME=0 behaves as 0. [CODE]
+  7.7 Option mods vs note-data mods [CODE read, behaviour INFERRED]:
+      - Option mods (speed, boost, reverse, drunk, hidden...) turn on/off with the attack window through
+        RebuildPlayerOptionsFromActiveAttacks (Song level = Stage + attacks that are on).
+      - Turn/transform mods (mirror, shuffle, little, noholds...) are NOT toggled in time. Each attack's string is queued
+        in m_ModsToApply and applied once to the NOTE DATA over a beat range (Player::ApplyWaitingTransforms
+        1722-1748). Timed attacks (start > 0): range from the song's timing (Attack::GetAttackBeats). "no mirror" at the end
+        does not undo anything.
+      - [SUPERSEDED BY THE CORRECTION BELOW] For a TIME=0 attack the sentinel start is used (GetRealtimeAttackBeats, Attack.cpp 29-57): start beat is pushed
+        to min(songBeat+8, lastDrawnBeat) = about beat -99 at song setup, and the end is start-second + LEN. Because the
+        start second is that of beat -99 (negative, about -50 s at 120 BPM), the covered range may be SHORTER than
+        LEN (e.g. LEN=60 might cover only part of the song) [INFERRED, check M3].
+      CORRECTION 2026-10-30 after M3 [OBSERVED log]: the "about beat -99" reading above is WRONG. The user's log for
+      #MODS:TIME=0:LEN=20:MODS=mirror on song 2 says: "Launch attack 'mirror' against P1 at -10000.000000" (the sentinel,
+      as predicted) and then "Applying transform 'mirror' from 6.000000 to 49.000000". So the range started at beat 6
+      (start = trunc(min(songBeat+8, lastDrawnBeat))+1; the transform is applied from the first Player::Update after the
+      song starts, when the song beat is still slightly negative and the note field has already drawn) and ended at beat 49,
+      i.e. about the full LEN (43 beats = 20 s only if the song is about 129 BPM; BPM not reported). Hypothesis that the
+      range lay before the song is disproved. Real effect of TIME=0 on turn/transform mods [CODE + OBSERVED]: they begin
+      about 8 beats (roughly 3-4 s) after the song start, not at 0, and notes before that stay unmodified; then LEN seconds.
+      Whether the mirror was visible on screen is unknown: the user saw no change, but could not compare with an unmodified
+      chart and the chart was a random pick. The log proves it was applied to the note data, not that mirror changed any
+      notes in that range. M3b/M3c (mod "big") test visibility.
+      Option mods (reverse) are unaffected: they work by attack window, as M1 showed.
+  7.8 SetupSong also applies every attack's SongOptions part immediately (1231); the later rebuild generally replaces
+      it. Effect for music-rate or other song-level mods inside TIMED attacks is unclear [UNVERIFIED].
+  7.9 Theme sounds "course attack launch"/"course attack ending" are loaded by Player (Player.cpp 483-486).
+
+8. MOD STRING VOCABULARY (PlayerOptions::FromString/FromOneModString, PlayerOptions.cpp 753-1521)  [CODE]
+  8.1 Grammar. String is split on ","; each mod is lowercased and trimmed, split on spaces; the LAST word is the mod name;
+      earlier words are prefixes: "no" (level 0), "N%" (level N/100; "ms" suffix = milliseconds), "*S" (approach speed
+      multiplier). Bare name = 100%. Boolean mods (turns, transforms, some flags) are on when level > 0.5, so
+      "50% mirror" is OFF. Speed forms: "Nx" (X-mod, regex ^[0-9]+(\.[0-9]+)?x$), "cN" (C-mod), "mN" (max-BPM mod).
+      "N lives" sets battery lives; exact for N up to 52 [TESTED, float math x86-64: 53 gives 52].
+  8.2 Tokens (complete for v1.3.0; extracted by script, 235 literals):
+   Speed/timing: resetspeed randomspeed drawsize drawsizeback modtimerdefault modtimersong modtimerbeat modtimergame
+      modtimermult modtimeroffset (plus Nx, cN, mN)
+   Accel: boost brake land wave waveperiod expand dwiwave expandperiod tanexpand tanexpandperiod boomerang
+   Effects: drunk drunkspeed drunkoffset drunkperiod drunkz drunkzspeed drunkzoffset drunkzperiod tandrunk
+      tandrunkspeed tandrunkoffset tandrunkperiod tandrunkz tandrunkzspeed tandrunkzoffset tandrunkzperiod
+      shrinklinear shrinkmult pulseinner pulseouter pulseoffset pulseperiod dizzy dizzyholds confusion confusionoffset
+      confusionx confusionxoffset confusiony confusionyoffset bounce bounceperiod bounceoffset bouncez bouncezperiod
+      bouncezoffset mini tiny flip invert tornado tornadoperiod tornadooffset tantornado tantornadoperiod
+      tantornadooffset tornadoz tornadozperiod tornadozoffset tantornadoz tantornadozperiod tantornadozoffset tipsy
+      tipsyspeed tipsyoffset tantipsy tantipsyspeed tantipsyoffset bumpy bumpyoffset bumpyperiod tanbumpy
+      tanbumpyoffset tanbumpyperiod bumpyx bumpyxoffset bumpyxperiod tanbumpyx tanbumpyxoffset tanbumpyxperiod
+      beat beatoffset beatperiod beatmult beaty beatyoffset beatyperiod beatymult beatz beatzoffset beatzperiod
+      beatzmult digital digitalsteps digitalperiod digitaloffset tandigital tandigitalsteps tandigitalperiod
+      tandigitaloffset digitalz digitalzsteps digitalzperiod digitalzoffset tandigitalz tandigitalzsteps
+      tandigitalzperiod tandigitalzoffset zigzag zigzagperiod zigzagoffset zigzagz zigzagzperiod zigzagzoffset
+      sawtooth sawtoothperiod sawtoothz sawtoothzperiod square squareoffset squareperiod squarez squarezoffset
+      squarezperiod parabolax parabolay parabolaz attenuatex attenuatey attenuatez xmode twirl roll cosecant zbuffer
+   Appearance: hidden hiddenoffset sudden suddenoffset stealth stealthtype stealthpastreceptors blink randomvanish
+      dark blind cover
+   Scroll: reverse split alternate cross centered converge(deprecated alias of centered)
+   Perspective: overhead incoming space hallway distant skew tilt
+   Turns (note data): mirror lrmirror udmirror backwards left right shuffle softshuffle supershuffle hypershuffle;
+      "no turn" clears all
+   Transforms (note data): little wide big quick bmrize skippy mines attackmines echo stomp planted floored twister
+      holdrolls nojumps nohands noquads noholds norolls nomines nostretch nolifts nofakes
+   Numbered families, n = 1-16: tinyN bumpyN stealthN darkN reverseN movexN moveyN movezN confusionoffsetN
+      confusionxoffsetN confusionyoffsetN
+   Fail/life: failarcade failimmediate (-> Immediate) | failendofsong failimmediatecontinue (-> ImmediateContinue) |
+      failatend (-> EndOfSong) | failoff | faildefault | bar battery lifetime | norecover power-drop | suddendeath
+      death | normal-drain | life lives | passmark
+   Misc gameplay: muteonerror randomattacks noattacks playerautoplay visualdelay "no w1".."no w5" (disable windows)
+      nohidelights hidealllights hidemarqueelights hidebasslights random(=random mods) clearall noteskin("no noteskin")
+      and any installed noteskin name (also with spaces, 1512-1516)
+  8.3 Quirks [CODE]:
+      a) Substring gates: names containing wave, expand, dwiwave, drunk, shrink, pulse, dizzy, confusion, bounce, tiny,
+         tornado, tipsy, bumpy, beat, digital, zigzag, sawtooth, square, parabola, attenuate, stealth, reverse, dark,
+         move, lights, modtimer, drawsize enter a branch that returns TRUE even when no exact token matched. A typo
+         such as "wavy" ... "wavefoo" is accepted silently, so WarnOnInvalidMods cannot catch it. A noteskin whose
+         name contains one of these substrings could never be selected by mod string (none of the shipped dance and
+         pump skins do).
+      b) A noteskin name with a space matches only at the end of the chain: the skin is set but the function returns
+         false, so WarnOnInvalidMods logs a false warning.
+      c) An empty/whitespace-only mod (e.g. "flip, ,mirror" or a trailing ", ") makes asParts empty and
+         asParts.back() (line 818) is undefined behaviour. #SONG mods are safe (empties removed at 546-552), but #MODS
+         strings reach WarnOnInvalidMods unfiltered [CODE, TESTED that the string arrives intact]. Possible crash
+         [INFERRED; not run].
+      d) Invalid mods in #SONG are only trace-logged at play time.
+  8.4 SongOptions tokens (SongOptions.cpp 151-): Nxmusic (music rate, e.g. 1.5xmusic), clap, metronome, autosync
+      autosyncsong autosyncmachine autosynctempo, "no effect", effectspeed effectpitch, staticbg randombg, savescore
+      savereplay, haste. "no X" turns off; a leading percent is ignored ("50% haste" = on). A mod string is fed to both
+      PlayerOptions and SongOptions; each ignores what it does not know. Song-level SongOptions are only assigned for
+      the master player (PlayerState.cpp 179).
+
+9. PIPELINE AND LEVELS
+  9.1 Stages [CODE]: #SONG field 3 -> CourseEntry.sModifiers -> Trail entry .Modifiers -> TrailEntry::GetAttackArray
+      (Trail.cpp 22-28) adds Attack::FromGlobalCourseModifier (start 0, length 10000, global) + the entry's timed
+      attacks -> ScreenGameplay queue -> SetupSong: LaunchAttack -> RebuildPlayerOptionsFromActiveAttacks (Song level =
+      Stage + attacks on) -> Current approaches Song every frame; turn/transform strings also go to m_ModsToApply.
+      Because course mods live at Song level, they do not alter the player's saved options or later screens.
+  9.2 Classification
+      WORKS (acted on): #MODS "=" form; #SONG/#SONGSELECT keywords; PlayerOptions and SongOptions tokens at levels the
+        engine reads (9.3); turn/transform mods (entry-wide; timed range per 7.7).
+      PARSED, CANNOT TAKE EFFECT: options read at Stage/Preferred level (9.3).
+      PARSED, IGNORED: unknown mod tokens; #DISPLAYCOURSE/#COMBO/#COMBOMODE; #STYLE (never reached); cached #RADAR
+        (never read back); "award" without a number.
+      NOT PARSED: #MODS ":" layouts of CourseFormat.txt (silently dropped); any other unknown tag.
+      UNVERIFIED: forced noteskins (an engine hack launches noteskin attacks before Player::Load, ScreenGameplay.cpp
+        1160-1177, and NoteField reads Current, but the shipped example and the wiki say it does not work; and the
+        reset at 1239 touches Current); survival-course option override (theme metric SurvivalModOverride, default
+        true: resets to clearall + default noteskin + DefaultModifiers before entry mods, 1024-1031).
+  9.3 Level the engine reads (grep of consumers, v1.3.0):
+      Current (course mod effective): FailType, passmark, muteonerror, disabled windows, playerautoplay, cosecant,
+        zbuffer, modtimer, all ArrowEffects options, NoteField noteskin.
+      Song: DrainType (LifeMeterBar 159-271; the constructor reads Stage at 93), battery max lives (LifeMeterBattery
+        95-258; initial lives read from Stage at 32).
+      Stage: LifeType (bar/battery/lifetime: Player 713, 2125; ScreenGameplay 683-731) -> a course mod "battery"/"bar"
+        will not change the life meter type [INFERRED; check M8].
+      Preferred: visualdelay (GameState.cpp 1262) -> no effect from a course.
+      Not checked: hide-lights options.
+
+10. LIVES, AWARD, GAINSECONDS
+  - #LIVES n>0: ONI/battery with n lives at selection (course:10.2).
+  - awardN / GAINLIVES: LifeMeterBattery::OnSongEnded adds the entry's gain when > -1, else calls the theme's
+    CourseSongRewardLives Lua callback (LifeMeterBattery.cpp 95-110); default -1.
+  - #GAINSECONDS: LifeMeterTime adds the entry's seconds at each song start (LifeMeterTime.cpp 107-137); only
+    meaningful for SURVIVAL.
+  - Priority when several are present: REPEAT > LIVES > GAINSECONDS (Course.cpp 199-209). The RhythmLunatic wiki
+    states the opposite order; the code wins. #LIVES with #GAINSECONDS: ONI wins and gain seconds are unused.
+
+11. LOADING, CACHE, WRITER
+  11.1 LoadFromCRSFile (226-296): uses Cache/Courses/<file> when it exists and (FastLoad true [default] or the .crs hash
+       matches). The cache is written after a non-cached load once radar values exist (course:5.5).
+  11.2 Writer (CourseWriterCRS 50-330) re-emits entries from the parsed structure: timed attacks as
+       "#MODS: TIME=%.2f:LEN=%.2f:MODS=..." (reloadable, TESTED), so cached times are rounded to 0.01 s.
+  11.3 Writer/loader mismatches in the #SONGSELECT cache [CODE; effect INFERRED, check M6]:
+       - GENRE is written only if m_bUseSongAllowedList (the resolved-song list flag) is set; the loader sets
+         m_bUseSongGenreAllowedList. So GENRE is never written: after the first load the criterion disappears.
+       - DURATION and BPMRANGE are written only if BOTH min and max > 0; a range starting at 0 is dropped.
+       - GAINSECONDS is written as float but read as int.
+       - METER written only if both > 0.
+       Net: a course may behave differently on the second launch. (Beta identical for GENRE, 15.)
+  11.4 #STYLE is written (when styles exist) but never read, and styles are never set, so it is never written.
+
+12. LUA API (ADD_METHOD in Course.cpp, Trail.cpp)
+  CourseEntry: GetSong, IsSecret, IsFixedSong, GetGainSeconds, GetGainLives, GetNormalModifiers (the per-entry mod
+    string), GetNumModChanges, GetTextDescription. GetTimedModifiers exists only as a commented-out line (1361): timed
+    mods are not exposed to Lua as a list.
+  Course: HasMods, HasTimedMods (any non-global attack), GetCourseType, GetCourseEntry/GetCourseEntries/
+    GetNumCourseEntries, GetAllTrails, IsEndless/IsNonstop/IsOni, GetScripter, GetDescription, GetTotalSeconds,
+    GetGoalSeconds, AllSongsAreFixed, IsAutogen, IsAnEdit, IsPlayableIn, IsRanking, GetBannerPath/BackgroundPath/
+    CourseDir/GroupName/EstimatedNumStages/PlayMode/DisplayFullTitle/TranslitFullTitle.
+  Trail: GetSong/GetSteps/IsSecret/GetNormalModifiers (TrailEntry); GetDifficulty/GetMeter/GetTotalMeter/GetStepsType/
+    GetRadarValues/GetArtists/GetTrailEntry(ies)/GetLengthSeconds/IsSecret/ContainsSong.
+  (Whether Docs/Luadoc lists all of these was not checked.)
+
+13. DOCUMENTATION VS CODE (Docs/CourseFormat.txt and Docs/Userdocs/Course_Examples)
+  D1  #MODS three formats with ":" ........ WRONG: no effect, no log. Correct: #MODS:TIME=a:LEN=b:MODS=x; or END=.
+  D2  final example of CourseFormat.txt (#MODS:\n TIME:1.00:END:50.00:MODS:C150;) ... no effect (same as D1).
+  D3  "#METER ... Beginner, Easy, Medium, Hard, Challenge and Edit"; example #METER:Medium:8; ... WRONG: Regular, Difficult.
+  D4  #STYLE documented and used by Doubles.crs ... never read by the loader.
+  D5  #LIVES "maximum(?) number of lives" ... sets the battery lives count (and forces ONI).
+  D6  "#GAINSECONDS and #LIVES mutually exclusive" ... both may be present; ONI wins.
+  D7  #SONGSELECT BPMRANGE/DURATION "whole numbers" ... decimals accepted; METER truncated.
+  D8  #SONGSELECT GAINSECONDS "exactly the same as #GAINSECONDS" ... int-truncated, and not inherited from the tag.
+  D9  #SONGSELECT MODS "I don't know what can be specified" ... see section 8; keywords: no award.
+  D10 SORT "results aren't exactly accurate" ... not investigated here.
+  D11 Course_Examples/readme: "Forced noteskins do not work currently" ... engine hack exists; UNVERIFIED.
+  D12 #REPEAT:YES ... any value containing "yes".
+  D13 Documented as available in StepMania only: nothing here is flagged ITGmania-specific except #SONGSELECT.
+
+14. COMMUNITY CLAIMS
+  - Reddit r/Stepmania "Library of Course Functions" (u/TightGround, ~8y before 2026-10; thread text supplied by the user
+    as screenshots 2026-10-30; the Reddit page itself still not fetchable). Claim-by-claim against v1.3.0:
+    R1 "#MODS tag does not seem to work": TRUE for every form tried in the thread. [CODE]/[TESTED on real parser text]
+       - "#MODS:TIME:1.500:LEN:0.500:MODS:no jumps;" (wiki/CourseFormat.txt colon form) and
+         "#MODS:TIME:0:LEN:9999:MODS:no jumps;" (a commenter's suggestion): the params are "TIME","1.500","LEN",... with no
+         "=", so ParseCourseMods skips them all (sBits.size() < 2 -> continue). No attack, no log line (7.4, D1).
+       - "#MODS:no jumps;" (OP's attempt): single param without "=", skipped, silently. Also needs TIME/LEN/MODS keys.
+       - Form that the code accepts: "#MODS:TIME=0:LEN=9999:MODS=no jumps;" (placed BEFORE the #SONG it modifies). [CODE]
+         Not run in game by me (M1).
+    R2 "CourseLoaderCRS reads the 3rd parameter of #SONG as mods": TRUE. [CODE] ParseCourseSong: param 3 is the mod
+       list, comma separated; these reach the song as an attack with start 0 / len 10000 (global course modifier,
+       7.1). So "#SONG:Group/Song:Medium:nojumps;" is the workable way to get a whole-song mod.
+    R3 Commenter "Modifiers are separated by comma": TRUE for both #SONG param 3 and MODS=... (comma list). [CODE]
+    R4 Commenter "#MODS of a course is the same syntax and internally the same as the #ATTACKS tag of an ssc": TRUE.
+       [CODE] CourseLoaderCRS::ParseCourseMods and NotesLoaderSM::ProcessAttacks (used by SSC #ATTACKS) have the same
+       TIME/LEN/END/MODS "=" loop. Differences not examined further.
+    R5 "no jumps" vs "NoJumps" vs "nojumps": all fine. [CODE] FromOneModString lowercases and splits on spaces; "no" sets
+       level 0, "nojumps" is a literal (PlayerOptions.cpp ~1342) and "jumps" with "no" prefix is read the same way, so
+       case and the space are not the problem. [INFERRED for "no jumps" with space: mod word is the last part].
+    R6 "Medium;nodifficult;" in the OP's #SONG line: the ";" after Medium ENDS the #SONG tag. "nodifficult" is then
+       stray text outside any tag and ignored by the MSD reader. [CODE] (MsdFile::ReadBuf). It was not a mod list and
+       "nodifficult" is not a mod name in any case. [INFERRED: the OP's #SONG entry itself loaded with no mods.]
+    R7 The OP's path "DDR 1st Mix to EXTREME\20,NOVEMBER(D.D.R.Version)": backslashes are converted to "/" in the
+       loader (CourseLoaderCRS.cpp ~454 and ~478). [CODE] Group and song folder, case-insensitive. A comma inside the
+       song folder name is fine in #SONG; it matters only in the mod list.
+    R8 "none of the code from CourseFormat.txt works... not even the specific examples copy-pasted": consistent with
+       D1-D3 for the #MODS examples. [CODE]; examples with #SONG only I have not run.
+    R9 Version caveat: the thread is about StepMania 5 / oITG era courses (8 years old). This analysis is v1.3.0. The
+       parser lines match, so the behaviour was probably the same then [INFERRED]; I did not diff the old tree.
+  - PR #173 (#SONGSELECT, mjvotaw, opened 2024-02-12, merged to beta 2024-03-06 by teejusb, 20 commits, 17 files). Page text
+    supplied by the user as a PDF 2026-10-30; commit messages also read earlier via git. What the PR says [stated by the
+    authors, not code]:
+    P1 Intent: #SONG is "not very well documented, and its capabilities are pretty limited"; #SONGSELECT is a
+       PARAM=VALUE alternative. The author "avoided changes that would affect how existing #SONG courses function".
+       The full description was added to Docs/CourseFormat.txt (so #SONGSELECT IS documented in the repo doc; what is
+       missing is the check against code, see D7-D9 and 6.5-6.7).
+    P2 Fixes bundled: a crash in CourseSortSongs when leaving Marathon mode (SongSort_TopGrades/LowestGrades, only on a
+       newly added course, because CourseWriterCRS did not write Course caches correctly); meter-range-only entries
+       picked different songs per course difficulty. [stated; not tested by me] Section 11.3 shows the cache writer
+       still drops GENRE/DURATION/BPMRANGE-min-0 in v1.3.0 and beta, so the writer fix was partial [CODE, effect
+       INFERRED, check M6].
+    P3 Review: teejusb asked for escapes (commas, # and ; in titles) -> added (SmEscape/SmUnescape, 6.3); asked for "-"
+       instead of ".." in ranges -> done, so #SONGSELECT ranges use "-" while #SONG keeps ".." (code: ParseRangedValue
+       splits on "-" only [CODE]). Docs list "=" and ":" as escapable too [matches 6.3 for the four list keys only].
+    P4 Merge note: the maintainer wrote he had not been able to "extensively test this" before merging because a release
+       was close, and would wait for reports. So the feature had little independent testing; my source-only findings
+       (6.1 whole-entry skip on unescaped "=", 11.3 cache gaps, D7-D9) were not discussed in the PR.
+    P5 Parameters in the PR text: TITLE GROUP ARTIST GENRE DIFFICULTY METER BPMRANGE DURATION SORT. GAINLIVES, GAINSECONDS
+       and MODS are in the code (6.2) but not in the PR's list (the repo doc covers MODS/GAINSECONDS in its example/notes).
+    Not found in the PR: discussion of ranges with decimals, case sensitivity of GROUP, or the cache.
+  - stepmania/stepmania issue #1107 (5.1-git, 2016, "Attacks (AKA Course Mods) not being read", reporter says .crs
+    attacks never launch; closed as duplicate of #1103). Different codebase era; not analysed. Cause not retrieved.
+  - FFR "guide for modded courses": uses the "=" syntax (TIME=..:END=..:MODS=..); says timing continues across songs
+    (contradicted by 7.5 for this code) and notes a sound plays when mods start/stop (consistent with 7.9).
+  - RhythmLunatic wiki mirror of the StepMania Courses page: "=" syntax in its #MODS examples (so it is right where
+    CourseFormat.txt is wrong); states a different type priority (contradicted, 10); says noteskin picking in #SONG is
+    nonfunctional (UNVERIFIED).
+
+15. BETA (26d81c1a6f vs v1.3.0)  [CODE]
+  Differences in these files are 295 deleted lines only (dead code: LoadFromBuffer, LoadEditFromBuffer,
+  GetEditFileContents, SetCourseType, Attack/TrailEntry operator==, unused PlayerOptions helpers, inventory slots).
+  Unchanged: ParseCourseMods, LoadFromMsd tag chain (still "||"), ParseCourseSong/SongSelect, FromOneModString,
+  writer GENRE flag, SetupSong attack loop and SetCurrentToLevel(Stage). Docs/CourseFormat.txt and the examples unchanged.
+  All findings apply to beta.
+
+16. IN-GAME CHECKS (none run) - implemented by tools/course/make_cref_test_pack.py (12 .crs + CHECKLIST.txt;
+    M10 is split into M10a/M10b). Add to the checks: M12 (R1) a course with "#MODS:TIME=0:LEN=9999:MODS=no jumps;" before
+    a #SONG, to confirm the form the Reddit thread could not find; not yet in the generator.
+  M1  Two-song course; song 1 mods "#MODS:TIME=10:LEN=10:MODS=reverse;" -> reverse for seconds 10-20. Predicted: works.
+  M2  Same with CourseFormat.txt format 1. Predicted: nothing, no log.
+  RESULT M1/M2 2026-10-30 [OBSERVED]: M1 PASS (arrows reverse, then reverse back, in song 1); M2 PASS (no change). Exact
+      timing (10 s / 20 s) not measured. Generator now has --diff to pin the chart (default still random 1..20).
+  M3  Song 2 only: "#MODS:TIME=0:LEN=20:MODS=mirror;" on a ~120 BPM song. Predicted: mirrored range shorter than 20 s (7.7).
+      RESULT M3 2026-10-30 [OBSERVED]: no mirror visible anywhere on song 2 (chart picked at random; user could not
+      compare with an unmodded chart, so a subtle change is not fully excluded). The user's log: "Applying transform 'mirror'
+      from 6.000000 to 49.000000" [OBSERVED]: applied from beat 6 to 49, about the full LEN, NOT shortened and NOT before
+      the song (7.7 correction). Visible effect still unknown. Follow-ups M3b (TIME=0 LEN=9999 big) and
+      M3c (TIME=5 LEN=20 big), added to the generator.
+  M4  Timed option mod at TIME=15 on song 2: starts 15 s into song 2, not cumulative (7.5).
+  M5  Rename song 2's folder: its timed #MODS appear on song 3 (5).
+  M6  Open Cache/Courses/<course>.crs after the first load of a course with #SONGSELECT:GENRE=..:DURATION=0-300: GENRE
+      and DURATION lines predicted missing (11.3). RESULT 2026-10-30: PASS [OBSERVED, user's Windows run]. Source line
+      was "#SONGSELECT:GENRE=CrefGenre:DURATION=0-300:BPMRANGE=0-300:DIFFICULTY=Medium:MODS=showcourse;" and the cache
+      file contains "#SONGSELECT:DIFFICULTY=Medium:MODS=showcourse;" (GENRE, DURATION and BPMRANGE all dropped; the other
+      keys survive). Effect on selection NOT yet observed. M6b (next): restart the game so the cached file is loaded;
+      M06 matched no song on the first load (genre CrefGenre does not exist), so if it now shows a song, the cache
+      loosened the criteria [INFERRED]. Another start after M6b should show the same.
+      RESULT M6b 2026-10-30: PASS [OBSERVED]. After restart (cached load) M06 lists 2 songs: entry 1 (#SONGSELECT, no
+      match on first load) now shows an apparently random song; entry 2 is the plain #SONG entry (song 1) as written.
+      Whether the random pick is stable across further restarts: NO. User 2026-10-30: it picks a different random song on
+      every restart [OBSERVED] (cached entry has no criteria, so the pick is re-rolled at each load).
+  M7  "foo" in #MODS -> log line "Error processing"; "foo" in #SONG mods -> no load warning (7.4). RESULT 2026-10-30: PASS
+      for both; correction: #SONG tokens ARE logged ("Attempted to load a non-existing mod") when applied. Also observed
+      M5 log line "fixed song entry ... does not exist. This entry will be ignored" and M10a "invalid #METER string: Medium" [OBSERVED].
+  M8  Entry mod "battery" with the normal life bar: predicted no change (9.3). RESULT 2026-10-30: PASS [OBSERVED]: life bar
+      stays a normal bar in song 1 (Stage-level LifeType not changed by an entry mod).
+  M9  Entry mod with a noteskin name (e.g. cel): does the skin change? (9.2) RESULT 2026-10-30 [OBSERVED]: song 2 (entry mod
+      "metal") did NOT change skin. Song 1 (cel) not reported yet. cel and metal exist in this repo's NoteSkins/dance.
+      Consistent with the wiki saying noteskins in #SONG do not work; cause not traced (the Current-level reset at
+      ScreenGameplay 1239 is one candidate [UNVERIFIED]).
+  M10 #METER:Medium:8 vs #METER:Regular:8: which shows 8? RESULT 2026-10-30: PASS [OBSERVED]. M10a: log line "invalid
+      #METER string: Medium" and a computed meter (user first guessed 12, then saw 10: the average of randomly chosen
+      charts changes between loads, see chart choice in section 10). M10b: shows 8. Code path: CourseLoaderCRS 118-125 ->
+      Course.cpp 753 -> Trail::GetMeter; Simply Love shows trail:GetMeter() (PaneDisplay.lua 583, theme dd06138b15).
+      An earlier version of this entry recorded 9 for M10b; the user corrected it to 8.
+  M11 Doubles.crs: does #STYLE matter?
+  Do NOT test 8.3c on a build you care about.
+
+17. OBSERVATIONS (possible bugs, not confirmed defects)
+  O1 tag-chain "||" (course:10.3). O2 attacks carry over after a failed #SONG (5). O3 whitespace-only mod UB (8.3c).
+  O4 cache drops GENRE/DURATION/BPMRANGE (11.3). O5 typos accepted by substring gates (8.3a). O6 false warning for
+  noteskins with spaces (8.3b). O7 TIME=0 transform starts about 8 beats late (7.7). O8 docs D1-D4.
+
+18. OPEN / NEXT
+  - User: (Reddit thread and PR #173 page received, section 14); run M1-M11 with the generated test pack (tools/course/make_cref_test_pack.py).
+  - Not read: Simply Love course screens/Lua; path resolution of #BANNER; SORT semantics; hide-lights level.
+  - Possible patches (none written): fix the "||" tag chain; write GENRE/min-0 ranges to the cache; correct
+    Docs/CourseFormat.txt (D1-D3).

@@ -1,0 +1,52 @@
+From 16614f1010f90900a3ea56b1413889e3233b60df Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 22:57:21 -0400
+Subject: [PATCH] CodeQL: drop extern/ results from the SARIF before upload
+
+paths-ignore in codeql-config.yml is not honored for compiled languages
+(build-mode: manual), so vendored third-party code under extern/ kept
+producing alerts. Analyze with upload: never, filter the SARIF with jq,
+then upload the filtered files with the same category.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011M5QaUAuCxRf34SxvbvdaX
+---
+ .github/workflows/codeql.yml | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/.github/workflows/codeql.yml b/.github/workflows/codeql.yml
+index 9c15a5c..54a7bc5 100644
+--- a/.github/workflows/codeql.yml
++++ b/.github/workflows/codeql.yml
+@@ -53,7 +53,28 @@ jobs:
+     - name: Build
+       run: cmake --build build ${{ env.CMAKE_BUILD_FLAGS }}
+ 
++    # paths-ignore in the config file is not honored for compiled languages
++    # (build-mode: manual), so results in extern/ (vendored third-party code)
++    # would still be reported. Analyze without uploading, drop the extern/
++    # results from the SARIF, then upload the filtered files.
+     - name: Perform CodeQL Analysis
+       uses: github/codeql-action/analyze@v4
+       with:
+         category: "/language:c-cpp"
++        upload: never
++        output: sarif-results
++
++    - name: Remove extern/ results from SARIF
++      run: |
++        mkdir -p sarif-filtered
++        for f in sarif-results/*.sarif; do
++          jq '.runs[].results |= map(select(all(.locations[]?.physicalLocation.artifactLocation.uri; (startswith("extern/") | not))))' \
++            "$f" > "sarif-filtered/$(basename "$f")"
++        done
++        ls -l sarif-filtered
++
++    - name: Upload filtered SARIF
++      uses: github/codeql-action/upload-sarif@v4
++      with:
++        sarif_file: sarif-filtered
++        category: "/language:c-cpp"
+-- 
+2.43.0
+

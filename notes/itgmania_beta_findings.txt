@@ -1,0 +1,339 @@
+ITGMANIA BETA-BRANCH FINDINGS (headlines, TempoDetector, series re-diff, commit reads, video refactor)
+=====================================================================================================
+REVISION: 2026-10-12-a | file: itgmania_beta_findings.txt | bytes: 23084
+Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
+sections are copied with their IDs unchanged (7b, 7c, 7d, 7e, 7i, 7j, 7o, 7r,
+7t, 7u). No new code findings. 7b-7e, 7i and 7j are HEADLINES of the companion
+notes; the full detail is in those files.
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, read-only findings on beta (nothing built or run).
+  VERSION BASIS: itgmania beta, heads 28e58a78c7 -> c8e69b9ca8 -> e4b4bf0755
+                 (7r, 7t, 7u); 7v in the toggle findings notes head 7b34bfe2ac
+                 (its new commits are NOT reviewed). Not in v1.3.0 unless stated.
+  TOPIC KEY:     beta, input codes, pad sensor, editor clipboard, WASAPI,
+                 BrokeIO, show one in row, websocket deflate, TempoDetector,
+                 Series single-pack rule, SortOrder reorder, IsSongSort, build
+                 cleanup, GetUnixTime, profile sort, video decoding refactor
+  READ WHEN:     the task touches any post-v1.3.0 change; check the companion
+                 note named in each headline for the full detail.
+  SEE ALSO:      itgmania_input_notes.txt (7b), itgmania_padsensor_notes.txt
+                 (7c), itgmania_editor_clipboard_mouse_notes.txt (7d),
+                 itgmania_misc_notes.txt (7e, 7i, 7j), itgmania_editor_notes.txt
+                 (7o), itgmania_series_notes.txt (7r = series 12h); engine
+                 notes v3 (5b survey, section 6 open items).
+Tags: [CODE] read in source, [INFERRED] reasoned, not run, [UNVERIFIED] not
+determined, [TESTED] user-run or synthetic test (source named).
+
+
+7b. INPUT CODES (2026-09-30) - itgmania_input_notes.txt
+  - "|" = alternate patterns; a failed alternative is dropped silently (Load
+    fails only if all fail). Works in CodeDetector metrics and
+    InputQueueCodeSet ([Screen] CodeNames/Code<Name>).
+  - Fallback CloseCurrentFolder on beta: dance "Up-Down|@MenuDown-MenuUp",
+    pump "@UpLeft-@UpRight-Center|@MenuDown-MenuUp".
+  - DetectCodes now tests EnteredCloseFolder before Prev/NextSteps; matters
+    for Simply Love (PrevSteps2="MenuUp").
+  - No consumers of Prev/NextOptionsList codes in src; no clash found.
+
+7c. PAD SENSOR / SNEKCONFIG (2026-09-30) - itgmania_padsensor_notes.txt
+  - Lua API documented (GetFullSensorState, StartSensorTest/StopSensorTest);
+    the drivers (SnekConfig, PumpHID sensor data) and enabling via the
+    InputDrivers pref are not. Neither is in the default lists (Windows,
+    macOS, Linux X11/LinuxEvent/LinuxJoystick). InputDrivers REPLACES the
+    defaults; names case-insensitive.
+  - Both drivers write binary values only; corner sensors never set.
+  - SnekConfig polls only during the sensor test; a code comment says gamepad
+    events pause on the board meanwhile (hardware behavior UNVERIFIED).
+  - Observations: no lock on the sensor table; tight retry loop with device
+    re-enumeration on a failed snek command; HidDevice::GetDeviceInfo never
+    frees the hid_enumerate list (also in v1.3.0). No theme uses the data.
+
+7d. EDITOR CLIPBOARD / UNDO / MOUSE (2026-09-30) -
+    itgmania_editor_clipboard_mouse_notes.txt
+  - Beta: Ctrl+Z/U undo, Ctrl+Y redo (50-level stacks, NOTE DATA ONLY; timing
+    is not undoable), Ctrl+X/C/V clipboard (Shift adds timing; clipboard is
+    static, persists across charts in one run). v1.3.0: one undo level, "U".
+  - Wheel = line scroll, Shift = page, Ctrl = scroll-speed presets; metrics
+    ScrollWheelAccelerationRate, ScrollSpeedApproachRate, ScrollSpeedPresets.
+    Mouse drag = area selection (Shift = snap to grid).
+  - Observation: the scroll-acceleration multiplier resets only on the next
+    wheel event, so keyboard line scroll may stay accelerated after a burst.
+
+7e. MISC BETA ITEMS (2026-09-30) - itgmania_misc_notes.txt
+  - WASAPI default: only a reorder in arch_default.h (driver is in v1.3.0 as
+    selectable). Shared mode, default endpoint only, mix format must be
+    float/16-bit else falls back to DirectSound-sw. SoundDrivers entries are
+    validated case-sensitively against the default list. No device-change
+    handling. No docs.
+  - BrokeIO lights: 17-byte HID report, on/off only; LightsDriver pref
+    REPLACES the default "SystemMessage,Export"; odd dance mapping (Up/Down/
+    Left/Right -> UL/UR/CN/LL); stale bytes and no retry after a failed write.
+
+7i. "SHOW ONE IN ROW" (2026-10-01) - misc notes section 3
+  - eefb37e388 (beta): in arcade-style toggle menus (NAV_TOGGLE_THREE_KEY:
+    theme NavigationMode="toggle" + ArcadeOptionsNavigation non-zero),
+    ShowOneInRow SELECT_ONE rows get a persistent down arrow (text item 0) plus
+    the value. Left/Right from the arrow first only moves focus; then they
+    change AND select at once; Start returns to the arrow.
+  - Side effect: ChangeValueInRowAbsolute (unused in v1.3.0) now carries the
+    logic, so the "ChangeValue" message fires on every value change (never
+    from input in v1.3.0). No shipped theme listens. No opt-in flag; no row
+    found that was moved because of it. No docs. Simply Love uses "toggle" on
+    PlayerOptions2/3 and AttackMenu; no collision found (7k, toggle findings).
+
+7j. WEBSOCKET PER-MESSAGE DEFLATE (2026-10-01) - misc notes section 4
+  - 2714ea8ada (beta, 2026-07-18): Lua field enableDeflate on
+    NETWORK:WebSocket{}; absent = TRUE. At v1.3.0 compression was never
+    requested (IXWebSocket default is off), so on beta the default silently
+    changes to ON; workaround enableDeflate=false.
+  - Client sends "Sec-WebSocket-Extensions: permessage-deflate;
+    server_max_window_bits=15; client_max_window_bits=15". A server without
+    it: no effect. Server accepts but zlib init fails: the handshake fails
+    (no fallback).
+  - Not in the Lua docs. Simply Love dd06138 opens two sockets (GrooveStats QR
+    login, online lobby) with no field set, so both ask for deflate on beta;
+    server support UNVERIFIED. IXWebSocket bumped v11.4.6 -> v12.0.1 (181461057a);
+    its 20 commits not reviewed.
+
+7o. TEMPODETECTOR / BPM FOLDING (2026-10-03, beta c8e69b9ca8) - editor notes Part 2 s.4b
+  Detector core compiled and run on synthetic click tracks (system libaubio
+  0.4.9; beta pins extern/aubio 152d6819b3, not checked out). [CODE unless
+  tagged]
+  - No folding code: 89-205 BPM only bounds the tested beat intervals; onset
+    periodicity makes T score also at T/2, 2T, 3T/2. TESTED synthetic:
+    60 -> 120, 70 -> 140, 90 -> 90 (400 s tracks); 210 -> 105, 240 -> 120,
+    300 -> 150 and 100 (90 s tracks).
+  - RemoveDuplicates (same as upstream ArrowVortex) deletes later entries
+    within 0.1 BPM of an earlier BPM, its double or its half: the TRUE tempo
+    can be removed when 2x outscores it; 1.5x/3x siblings and near-duplicates
+    survive.
+  - Run() down-weights only the first 100 onsets (mean |sample|; the rest stay
+    1.0); identical in upstream, commented out in one standalone port. On
+    short synthetic tracks it changed results (60 BPM -> no result; 90 -> 180);
+    on 400 s tracks it did not. Real songs untested; cause of the empty result
+    not traced.
+  - Upstream raw URLs that worked: raw.githubusercontent.com/uvcat7/
+    ArrowVortex/master/src/Editor/FindTempo.cpp and the StepMania-AMX copy.
+
+7r. SERIES RE-DIFF ON BETA + SORTORDER REORDER (2026-10-03, beta e4b4bf0755) - series notes 12h
+  - BETA HEAD MOVED c8e69b9ca8 -> e4b4bf0755 (84 commits over v1.3.0). The one
+    new commit is the video decoding refactor (7u). Series files: Group.cpp/.h
+    identical to v1.3.0; SongManager.cpp/.h only GetGroupsInSeries;
+    MusicWheel.cpp only the single-pack rule; ScreenSelectMusic.cpp only the
+    DetectCodes reorder; fallback metrics no series lines; Simply Love pin still
+    dd06138.
+  - SORTORDER: enum reordered on beta (Series to position 1; Recent*, Length
+    into the song-sort block; commits dbe09dffb6, b1a53c70e8, df4aaa8aeb).
+    Profiles store the sort by string name (Profile.cpp ~1598, ~1811), so saved
+    data is safe. Lua docs match the C++ array (33/33, scripted). IsSongSort is
+    now a range test (>= SORT_PREFERRED && <= SORT_DOUBLE_CHALLENGE_METER) that
+    includes Series, Recent, RecentP1/P2 and Length, so Recent sorts are newly
+    remembered as the preferred/profile sort [INFERRED; two call sites,
+    MusicWheel.cpp ~1616, GameState.cpp ~929].
+  - Still open: third-party themes using numeric enum values (none in
+    _fallback or SL dd06138).
+
+7t. THE SIX COMMITS AFTER 28e58a78c7 (2026-10-03) [CODE unless tagged; not built or run]
+  1. e9ba1e1526 (Eubanks, 2026-09-26) "Remove dead build options and
+     backends": 15 files, +15/-1494. Removes RageDisplay_GLES2, RageSoundDriver_OSS,
+     FindOSS.cmake, CMake options WITH_GLES2/WITH_X11/WITH_XRANDR and the
+     HAS_X11/HAS_XRANDR/HAS_OSS/HAS_GTK3 variables, an X11 clipboard block in
+     ArchHooks_Unix.cpp, and a `#ifndef HAVE_X11` guard around glewInit.
+     - Default builds behave the same: the removed items were never compiled in
+       (commit message: SUPPORT_GLES2, WITH_OSS, HAVE_X11 never defined by
+       CMake; no source still tests HAVE_X11/HAVE_XRANDR/HAS_*; HAVE_GTK is
+       still set from GTK3_FOUND).
+     - Linux builds now ALWAYS require X11 and Xrandr; WITH_X11=OFF /
+       WITH_XRANDR=OFF no longer exist (only a custom -DWITH_X11=OFF build
+       changes; the message says those could not work). glewInit() is now
+       unconditional (same as before).
+     - ArchHooks_Unix::GetClipboard: the X11 version was dead; the function still
+       logs "Compiled without any supported clipboard source" and returns "".
+       Only caller: ScreenTextEntry.cpp:254 (paste into a text box), so on Linux
+       paste gives an empty string and a Warn log, as in v1.3.0.
+     - VideoRenderers defaults: "opengl" (Linux), "opengl,d3d" (Windows)
+       (StepMania.cpp ~402, 412). The "gles2" branch in CreateDisplay is gone: a
+       hand-edited "gles2" used to be SKIPPED (the branch never created a
+       display); on beta any unknown name makes CreateDisplay throw
+       ERROR_UNKNOWN_VIDEO_RENDERER (fatal) [CODE for the throw; INFERRED for
+       the old skip].
+     - Sound: "OSS" removed from the Linux default list; a user SoundDrivers
+       entry "OSS" is now removed with a Warn log and a user-facing warning
+       (RageSoundDriver.cpp ~39-57); it was never a working driver
+       [INFERRED: not built]. Docs: only historic Changelog_sm5.txt lines.
+  2. beed677537 (Brandon W, 2026-09-28) "Expose unix time to lua": global
+     GetUnixTime() = static_cast<double>(time(nullptr)) (DateTime.cpp);
+     documented in LuaDocumentation.xml and Lua.xml ("since ITGmania 1.4.0").
+     Doc says return int; the registered value is a Lua number (double), exact
+     for current timestamps. UTC-based by definition of time().
+  3. 7d3bd3a83c (Eubanks, 2026-09-30) "Don't split *PERMEASURE":
+     NPSPERMEASURE / NOTESPERMEASURE cache-tag parsing (NotesLoaderSSC.cpp) scans
+     for commas in place instead of split() + string vectors. Commit message
+     claims ~6% fewer CPU cycles on warm-cache startup (author's figure, not
+     verified). Floats identical to before (strtof + isfinite else 0). Ints: old
+     std::stoi logged a Warn and returned 0 on a non-number or out-of-range
+     value; new (int)strtol gives 0 with NO log line for a non-number, and a
+     clamped long cast to int for out-of-range (64-bit-long platforms: 4294967296
+     -> 0, 2147483648 -> -2147483648; Windows 32-bit long clamps to INT_MAX)
+     [INFERRED from strtol/cast rules; not run]. Only corrupt cache values reach
+     this. Empty segments skipped in both.
+  4. 4101049b92 image-cache cleanup: see 7s (load/memory findings).
+  5. c8e69b9ca8 (Eubanks, 2026-10-01) "Cleanup profile loading/sorting code"
+     (ProfileManager.cpp +46/-215): the four LoadLocalProfilesBy{Priority,Name,
+     Recent,CreationTime} are one template LoadLocalProfiles(compare).
+     [CODE; consequences INFERRED, not run]
+     a) PRIORITY ORDER NOW ACTUALLY APPLIED. In v1.3.0 the priority insertion
+        loop iterated g_vLocalProfile, which is empty at that point
+        (UnloadAllLocalProfiles clears it; add_category_to_global_list runs
+        after), so it never executed and profiles stayed in directory-listing
+        order within each type (code from b43af6dce9, 2014). Beta stable-sorts
+        each type by Type.ini Priority; Priority is the default sort (pref
+        ProfileSortOrder). After updating, a machine whose saved priorities
+        differ from folder order may see the profile list reorder; in v1.3.0 a
+        "move up/down" in Manage Profiles (MoveProfilePriority) would not
+        survive a restart.
+     b) Priority now also obeys ProfileSortOrderAscending (default true); with
+        "No" priority order is reversed on load while MoveProfilePriority and
+        InsertProfileIntoList still assume ascending numbers (observation).
+     c) std::sort -> std::stable_sort: equal names/dates keep directory order.
+     d) LoadEditableDataFromDir is called for every sort mode (v1.3.0: only
+        Alphabetical): one small extra file read per profile in other modes.
+     e) Ascending/descending meaning for Recent and CreationTime and Name is
+        unchanged (checked line by line).
+     f) Array indexing by m_Type is safe (invalid type strings map to Normal;
+        a missing Type.ini leaves Normal).
+  6. e4b4bf0755 video decoding refactor: see 7u.
+  Open points: release-note mention of 5a; in-game checks: (i) reorder profiles
+  in Manage Profiles on v1.3.0, restart, see whether the order sticks, then
+  repeat on beta; (ii) Linux: VideoRenderers=gles2 should now abort start with
+  an unknown-renderer error.
+
+7u. VIDEO DECODING REFACTOR e4b4bf0755 (2026-10-04) [CODE unless tagged; no video playback possible here]
+  - BASIS: git show/diff e4b4bf0755~1..e4b4bf0755; src/arch/MovieTexture/ at
+    beta~1 equals v1.3.0, so the diff IS the v1.3.0 -> beta change. Read in full:
+    new MovieTexture_FFMpeg.cpp/.h, all hunks of MovieTexture_Generic.cpp/.h,
+    the old FFMpeg code. Checked: g++ -std=c++17 -fsyntax-only -Wall -Wextra on
+    both .cpp against extern/ffmpeg-w32/include: exit 0, no warnings in these
+    files (not linked). PR thread not looked for [UNVERIFIED].
+  - COMMIT: Brandon W, author 2026-09-18, committer 2026-10-03, "Refactor video
+    decoding subsystem for performance, sync, and maintainability." No body. 4
+    files, +531/-523. Only MovieDecoder_FFMpeg implements MovieDecoder;
+    MovieTexture_Null untouched; Lua entry points (RageTexture.cpp ~106-114:
+    position/loop/rate) unchanged. No Docs mention.
+  1. WHAT CHANGED
+  a) Decoder. v1.3.0: sliding window of 50 FrameHolder raw AVFrames (comment
+     "roughly 100mb") plus packet_buffer_ growing one PacketHolder per packet
+     until EOF then reused for looping (payloads appear to stay resident
+     [INFERRED]); per-holder mutexes; the decode thread polled sleep_for(1 ms)
+     when full; sws_scale ran in GetFrame on the MAIN thread. Beta: a bounded
+     queue. The worker reads, decodes AND colour-converts into a ConvertedFrame;
+     kMaxQueueFrames=4 queued, kMaxPoolFrames=6 recycled; it blocks on a
+     condition variable when full (no polling). GetFrame on the main thread only
+     pops and memcpy's rows into the texture surface (or discards for nullptr).
+     Packets are not retained.
+  b) Timestamps: PTS = best_effort_timestamp, else pts, else pkt_dts; first
+     PTS subtracted; forced monotonic (a backwards PTS becomes last_pts +
+     last_duration); duration = pkt_duration, else avg_frame_rate, else 1/30 s.
+     v1.3.0 used pkt_dts (or last frame + delay).
+  c) Looping: v1.3.0 Rollover() plus an offset_ ring. Beta: the worker loops
+     itself. At EOF it marks the last QUEUED frame is_last_frame (or sets
+     end_of_movie_ if the queue is empty), then SeekToStart (av_seek_frame,
+     avcodec_flush_buffers, PTS reset) and keeps decoding. GetFrame returns 1
+     for the flagged frame; the Generic side sets clock_ = 0. Rollover() is a
+     no-op.
+  d) Display pacing (Generic.cpp): first frame shown at once
+     (first_frame_displayed_; SetPosition(0) clears it); frames more than 0.1 s
+     late (CheckFrameTime() < -0.1) are popped without upload until the front
+     frame is within 0.1 s or the queue is empty (the shown frame can then be up
+     to one frame early [INFERRED]); loop wrap sync: if loop_ and the front
+     frame's PTS < clock_ - 0.5, clock_ = that PTS; finished_ && loop_ triggers
+     Rewind() and restart; SetLooping now also forwards to the decoder (in
+     v1.3.0 Lua loop(false) changed only the Generic flag while the decoder kept
+     looping; on beta loop(false) lets the decoder thread exit at EOF).
+  e) Teardown: ~MovieTexture_Generic calls Cancel(), joins the thread, resets
+     the decoder; ~MovieDecoder_FFMpeg calls Cancel()+Close(); Close() frees
+     sws/codec/format contexts with the AVIO pb nulled first, deletes the
+     RageFile, uses avio_context_free.
+  2. SUPPORT FOR THE COMMIT MESSAGE (no measurement): removed 1 ms polling and
+     main-thread sws_scale; the main thread now memcpy's pitch x height per
+     shown frame [INFERRED: less main-thread work]. Sync: late-frame dropping and
+     best_effort_timestamp; no audio clock: clock_ still advances by engine
+     delta time x rate_ as in v1.3.0.
+  3. DIFFERENCES A PLAYER COULD SEE [INFERRED; not tested]
+  a) Look-ahead shrinks from 50 decoded frames to 4: ~133 ms at 30 fps, ~67 ms
+     at 60 fps, vs ~1.7 s at 30 fps. A decoder stall longer than that (slow disk,
+     CPU contention, heavy keyframes) shows as a held frame, then dropping of
+     late frames; likeliest for large videos on slow CPUs.
+  b) Memory per open movie (arithmetic only). Surface = image size (not padded
+     to a power of two: Generic.cpp ~226-229 [CODE]); ConvertedFrame = pitch x
+     height. 1280x720: ~1.8 MB (YUYV 2 B/px) or 3.7 MB (32-bit); 1920x1080: ~4.1
+     / 8.3 MB. Up to ~6 live frames = 11-22 MB (720p), 25-50 MB (1080p).
+     v1.3.0: 50 raw YUV420 frames (~1.4 MB at 720p, 3.1 MB at 1080p = ~69 /
+     155 MB) plus all packets (~the compressed file size).
+  c) Decode errors: the worker stops for good on any avcodec_receive_frame error
+     other than EAGAIN/EOF: logs "DecodeMovie: decoding error: N", leaves the
+     loop, returns 0; failure_ is NOT set, so the picture freezes on the last
+     frame. v1.3.0 treated a non-zero receive status as "likely not fatal" and
+     continued [CODE for both]. avcodec_send_packet errors only log a warning.
+     Whether real files hit receive_frame errors is [UNVERIFIED].
+  d) Lower CPU when the queue is full (no polling) [CODE].
+  4. OBSERVATIONS (not confirmed defects)
+  a) STALE end_of_movie_ WHEN LOOPING [CODE for the lines; MODEL for the
+     effect]. DecodeMovie EOF branch (~415-433): if the queue is EMPTY at EOF it
+     sets end_of_movie_=true; with looping_ it then seeks and continues, and
+     nothing clears the flag (writes: Init ~159, HandleReset ~236, both EOF
+     branches). EndOfMovie() = end_of_movie_ && queue empty. UpdateFrame treats
+     EndOfMovie() like a last frame and, when loop_, sets clock_=0. So after
+     such an EOF, each time the queue is momentarily empty the clock resets to 0
+     while the next PTS is later, and display waits for the clock to catch up
+     (the wrap-sync handles only frames EARLIER than the clock). The flag is set
+     only when decoding is not staying ahead of display at the loop point
+     (normally the queue holds up to 4 frames at EOF and the flagged-frame path
+     is used).
+     MODEL: a 60-line time-stepped Python transcription (not the real class; not
+     saved). 30 fps, 60-frame loop, 12 s, consumer at 60 Hz: decode 2 ms/frame:
+     6 loops, 6 clock resets, flag False. Decode 40 ms/frame (slower than real
+     time): flag stuck True, 14 clock resets for 2-4 loops (~8 spurious). Decode
+     30 ms: same as 2 ms. With the flag also cleared on seek: 0 resets. A
+     candidate one-line change: set end_of_movie_ only when !looping_ (not
+     applied; not tested on the real class). The model fixes the rates; real-world
+     likelihood UNKNOWN.
+  b) LOST WAKE-UP WINDOW [INFERRED from C++ condition_variable rules]: Cancel()
+     and Rewind() set atomics WITHOUT queue_mutex_ then notify_all; a notify
+     between the worker's predicate check and its block is lost. For Cancel() the
+     main thread then waits in join() with nobody to notify: a hang on destroying
+     a movie texture. Tiny window, only while the queue is full; not observed.
+  c) can_consume_cv_ is notified in four places and never waited on.
+  d) last_pts_, last_duration_, timestamp_offset_, first_pts_seen_ are written
+     by the worker without queue_mutex_; GetTimestamp reads last_pts_ under the
+     lock only when the queue is empty. Formally a data race; small practical
+     effect [INFERRED].
+  e) Restart after the thread exited: with loop(false) the worker exits at EOF
+     (or after a decode error, 3c). Rewind() only sets reset_, serviced only by
+     the worker, so Rewind/position(0) cannot restart it; SetPosition does not
+     clear finished_. Same reading for v1.3.0 (UpdateFrame returned early when
+     finished_), so no regression seen; callers: Lua RageTexture:position(),
+     Sprite.cpp ~854, ActorMultiVertex.cpp ~374. The new finished_&&loop_
+     restart branch has the same limit if loop is turned on after the thread
+     ended [INFERRED].
+  f) GetFrame copies rows into the texture surface; with
+     MovieTextureDirectUpdates (default true, Generic.cpp ~32) the surface
+     pointer is locked texture memory (~230-234). Behaviour with the other
+     setting not read [UNVERIFIED].
+  5. COMPATIBILITY: new code reads AVFrame::pkt_duration and
+     best_effort_timestamp, present in the pinned FFmpeg: extern/ffmpeg commit
+     9bc0bcce7a is RELEASE 5.1.8 (libavutil 57.28; raw headers fetched); the
+     Windows bundle extern/ffmpeg-w32 is libavutil 57.28 / libavcodec 59.37.
+     Other FFmpeg lines (system FFmpeg) not checked [UNVERIFIED]. Prefs unchanged:
+     MovieColorDepth (default 32), MovieTextureDirectUpdates (default true).
+  6. IN-GAME CHECKS (I cannot run these): (1) same video background/banner on
+     v1.3.0 and beta: smoothness, CPU, RSS with several videos; (2) a large
+     looping BGA on a slower CPU: freeze at the loop point of about the video
+     position in seconds? (4a); (3) heavy disk/CPU load during playback: hold,
+     then clean catch-up? (3a); (4) Log.txt "DecodeMovie: decoding error" on real
+     files (3c); (5) Lua loop(false) on a movie texture: does it stay on the last
+     frame; does position(0) restart it? (4e); (6) leave/re-enter video screens
+     quickly many times: any hang on exit? (4b; expected never).
+  - Not done: the PR discussion; any measurement; a real-file test; Lua docs for
+    RageTexture loop/position.

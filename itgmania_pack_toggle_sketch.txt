@@ -1,0 +1,576 @@
+ITGMANIA PACK / SONG TOGGLE - ENGINE SKETCH - WORKING NOTES (v1.3.0, tag 8a3bf8884a)
+====================================================================================
+REVISION: 2026-10-07-b | file: itgmania_pack_toggle_sketch.txt | bytes: 36611
+Rev 2026-10-07-b: I3 items 24-26 DONE, results in I4; no code or patch changes.
+Rev 2026-10-07-a: adds Part I (user test results, open test list); no code or patch changes.
+Rev -a: Part C compressed to design notes (ids C1-C5 kept); no new findings.
+Status: Parts A-I written (A-E and F 2026-09-30; G and H 2026-10-01; I 2026-10-07).
+Originally written in chunks so a usage-limit interruption loses little.
+Not built, not run. Tags: [CODE] read in
+source, [INFERRED], [UNVERIFIED], [TODO].
+Background and user test results: itgmania_engine_notes.txt section 7f.
+
+PART A. FACTS FROM THE CODE THAT CONSTRAIN THE DESIGN
+-----------------------------------------------------
+A1. A full reload path that REMOVES songs already exists [CODE:
+    SongManager.cpp Reload ~175-255]. Reload(bAllowFastLoad, ld): flush
+    dir caches, save machine + player profiles, unjoin players, FreeCourses,
+    FreeSongs, then InitAll(ld, onlyAdditions=false), reload profiles,
+    rejoin, UNLOCKMAN->Reload(), UpdatePreferredSort. So a "skip" toggle
+    can take effect through a reload WITHOUT restarting the game. Earlier
+    note said the removal path was unread; it is FreeSongs + InitAll.
+    Callers: ScreenReloadSongs.cpp:80 and ScreenInstallOverlay.cpp:171,
+    both with bAllowFastLoad=false, i.e. PREFSMAN FastLoad is forced
+    OFF for that reload. CORRECTED 2026-10-01: FastLoad off does NOT mean
+    re-parse everything. Song::LoadFromSongDir (Song.cpp ~311-316) still
+    uses an existing cache file unless GetHashForDirectory(songdir) !=
+    the stored hash. That hash = per-file (mtime + size) from the file DB,
+    no file contents read (RageUtil_FileDB.cpp FileSet::GetFileHash;
+    RageFileDriverDirectHelpers.cpp hash = st_mtime). So unchanged songs
+    load from cache after a stat pass; only new/changed/uncached songs
+    are fully parsed (and re-cached). ImageCache.cpp ~415 same pattern
+    (full-file hash of images when FastLoad is off). [CODE] Per-song cost
+    versus a FastLoad startup: not measured [UNVERIFIED]. Time it in game:
+    "Reload Songs" vs normal startup.
+A2. LoadSongDir structure [CODE: SongManager.cpp ~415-700]:
+    1 list pack folders; 2 StripCvsAndSvn/StripMacResourceForks;
+    3 per pack SanityCheckGroupDir + list song folders -> into
+    std::map mapGroupSongDirs (keyed by pack folder name); 4 build
+    songsToLoad from the map (and create Group objects here, ~520-525);
+    5 threaded load; 6 finalize loop over the map (AddGroup, banner
+    cache, LoadGroupSymLinks). A pack name absent from the map is never
+    listed, never given a Group, never loaded, never cached-read.
+    The right filter point is step 3 (next to SanityCheckGroupDir) or
+    just before step 4.
+A3. Zero-song packs are already handled: a group whose songs all fail or
+    are absent gets its Group deleted and is not added (~640-650); note
+    the `continue` there skips LoadGroupSymLinks for it. [CODE]
+A4. FreeSongs clears songs, groups, series map, m_SongsByDir and
+    m_mapSongGroupIndex [CODE: SongManager.cpp ~770-797], so Reload fully
+    rebuilds everything, including Series (AddGroup re-runs).
+A5. The group list used by menus comes from m_sSongGroupNames, filled by
+    AddGroup only for packs that loaded at least one song
+    [CODE: GetSongGroupNames ~874; AddGroup ~313]. CONSEQUENCE for design:
+    if a disabled pack is SKIPPED at load, it never appears in
+    ScreenOptionsToggleSongs (which lists GetSongGroupNames), so the UI
+    could not offer to re-enable it. A "skip" design needs a separate
+    source for the pack list (directory listing of Songs/, or the stored
+    disabled-pack list). [INFERRED from the two code paths]
+A6. Scores: the profile loader deliberately tolerates song IDs with no
+    loaded song, with a comment that this is so scores are not deleted
+    when AdditionalSongsFolders change [CODE: Profile.cpp ~2120-2125].
+    So skipping a pack should not delete its scores; they stay in the
+    profile and reattach when the pack loads again. [INFERRED for the
+    whole round trip; not tested]
+A7. .include "symlink" files inside a pack load their destination song
+    separately and attach it to THIS pack's group [CODE: LoadGroupSymLinks
+    ~695-730]. They are processed in the finalize loop only for packs in
+    mapGroupSongDirs, so a skipped pack's .include files are not read.
+    A zero-song pack skips this step (A3). [CODE]
+A8. Reload screen: Themes/_fallback/metrics.ini line 2792 defines
+    LineReload="gamecommand;screen,ScreenReloadSongs;name,Reload Songs"
+    [CODE]. ScreenReloadSongs calls SONGMAN->Reload(false, ...) (A1).
+    Simply Love's use of it: see A11 [RESOLVED].
+A9. The existing toggle screens CANNOT be opened as-is [CODE for the
+    lookup; INFERRED for the conclusion]. ScreenManager::MakeNewScreen
+    reads the metric [<ScreenName>] Class (ScreenManager.cpp ~573) and
+    reports a script error if the class is not found; _fallback has no
+    [ScreenOptionsToggleSongs] or [ScreenOptionsToggleSongsSubPage]
+    sections (grep 2026-09-30, earlier note). So besides a menu entry,
+    a theme must define those two sections (Class=..., Fallback=...,
+    NextScreen/PrevScreen). This resolves the earlier UNVERIFIED about
+    "theme-defined blocks". IsScreenNameValid (~364) confirms the same
+    rule.
+A10. Service menu: [ScreenOptionsService] LineNames lists
+     "GameType,GraphicSound,KeyConfig,Arcade,InputOptions,SoundGraphics,
+     Profiles,Advanced,Reload,Credits" and each Line<Name> is a
+     gamecommand "screen,<Screen>;name,<Label>" [CODE: _fallback
+     metrics.ini ~2778-2792]. A line such as
+       LineToggleSongs="gamecommand;screen,ScreenOptionsToggleSongs;name,Toggle Songs"
+     plus adding ToggleSongs to LineNames would be the minimal entry
+     point. [INFERRED: follows the existing pattern; not tested. Also the
+     language strings (Languages/en.ini) for the row/screen names not
+     checked.]
+A11. Simply Love reload behavior [CODE: SL dd06138 metrics.ini ~252,
+     SortMenu_InputHandler.lua ~128]: the sort menu's "Load New Songs"
+     goes to ScreenReloadSongsSSM, which has OnlyLoadAdditions=true, so it
+     calls SONGMAN->LoadAdditions (adds songs only; ScreenReloadSongs.cpp
+     ~76). Removal (or re-hiding) needs the full Reload(false) path, i.e.
+     a screen with OnlyLoadAdditions=false (the _fallback service-menu
+     "Reload Songs"). Also LoadAdditions runs InitAll(onlyAdditions=true),
+     which calls LoadEnabledSongsFromPref again (InitSongsFromDisk ~281),
+     so DisabledSongs is re-applied to songs there. [CODE]
+A12. Other consumers of the per-song disable flag [CODE]:
+     - MusicWheel BuildWheelItemDatas (~505) and FilterWheelItemDatas
+       (~1341): drop LOCKED_DISABLED songs.
+     - SongCriteria::Matches (SongUtil.cpp ~80): rejects them, so anything
+       using criteria (course generation, random picks by criteria) is
+       covered.
+     - SongManager::GetRandomSong (~1763): skips songs where
+       !NormallyDisplayed(), which is any non-zero SongIsLocked result, so
+       disabled songs are not picked.
+     - NOT covered: SongManager::GetNumSongs() counts m_pSongs (all
+       loaded), so counts shown by a theme include disabled songs.
+       Observation: GetNumUnlockedSongs() returns songs where
+       SongIsLocked & ~LOCKED_LOCK is NON-zero (~1208), i.e. it counts
+       songs locked for other reasons, which looks inverted relative to
+       its name [CODE; observation, not a confirmed defect; impact on
+       themes not checked].
+     Whether every other reader of m_pSongs/GetSongs(group) respects the
+     flag was NOT audited [TODO if the hide design is pursued].
+A13. Song::m_sGroupName is set for every loaded song (Song.cpp ~294-300),
+     and Group has no enabled flag today (Group.h). [CODE]
+
+PART B. DESIGN OPTIONS (evaluation; none implemented)
+-----------------------------------------------------
+Goals: (1) menus show only wanted packs/songs, (2) optionally avoid the
+load cost, (3) toggle from inside the game, (4) settings persist,
+(5) scores and cache are not damaged.
+
+B1. HIDE ONLY (live toggle, no load saving)
+  - State: Group gets a bool m_bEnabled (default true). Persisted in a new
+    preference "DisabledGroups" (";"-separated pack FOLDER names, same
+    style and lenient matching as DisabledSongs).
+  - Effect: UnlockManager::SongIsLocked returns LOCKED_DISABLED when the
+    song's group is disabled. Because every wheel, criteria and random
+    path already keys on LOCKED_DISABLED (A12), no wheel change is needed.
+    A separate group flag keeps individual song toggles intact when a
+    pack is switched off and on again (a pack switch must not overwrite
+    per-song state).
+  - Cost: one group lookup per SongIsLocked call (map find by name; the
+    wheel calls it per song per build/filter). [INFERRED: negligible vs
+    the existing work; not measured]
+  - Series/wheel: a pack with all songs hidden has no rows (user-tested
+    equivalent with DisabledSongs), so series counts and parent rows
+    follow. On beta the single-pack-series rule counts groups REGISTERED,
+    not visible ones (series notes 12a), so hiding one of two packs in a
+    series leaves a parent row with one visible child. [INFERRED]
+  - Does not save startup time or memory (A1/A2: load happens first).
+
+B2. SKIP AT LOAD (saves time and memory; needs reload/restart)
+  - In LoadSongDir step 3 (A2), after SanityCheckGroupDir, skip pack
+    folder names present in DisabledGroups before adding to
+    mapGroupSongDirs. Nothing else in the load path sees the pack.
+  - Takes effect on next startup or on Reload(false) (A1), which is the
+    full service-menu "Reload Songs"; Simply Love's "Load New Songs"
+    uses LoadAdditions and will NOT remove loaded packs (A11) but WOULD
+    add a pack that was un-skipped. [CODE]
+  - Reload(false) forces FastLoad off, so each song's cache is validated
+    by a directory hash (mtime+size) first; unchanged songs still load
+    from cache (A1, corrected 2026-10-01). [CODE; relative speed vs a
+    FastLoad startup not measured]
+  - UI problem (A5): skipped packs are not in GetSongGroupNames, so the
+    toggle screen must list packs from the disk directory listing (or
+    from DisabledGroups plus loaded groups) to allow re-enabling.
+  - Scores stay in the profile (A6). Cache files for the skipped pack
+    stay on disk, unread. [INFERRED]
+
+B3. RECOMMENDED: B1 + B2 TOGETHER
+  - One list (DisabledGroups) drives both. A pack toggled off in the UI
+    is hidden immediately (B1), and is not loaded the next time songs are
+    loaded (B2). Toggling ON needs a reload before songs appear, since
+    they were never loaded; UI text should say so. Alternative: keep B1
+    only unless a large library demands B2.
+  - Keep DisabledSongs as is (song level).
+
+B4. UI LAYERS
+  a) Engine screens only: add LineToggleSongs to [ScreenOptionsService]
+     and define the two missing screen sections (A9/A10). Pack-level rows
+     would need ScreenOptionsToggleSongs changed to add On/Off per pack
+     (today it is a plain list that opens the song page).
+  b) Simply Love: needs Lua bindings (Part C, C4). SL could add a sort
+     menu entry or an operator-menu screen; the sort menu and options
+     are Lua (A11). SL pins the engine by submodule-style commit, so
+     a theme change needs the engine change first.
+  c) Standalone tool: edits Preferences.ini (DisabledSongs/DisabledGroups)
+     with the game closed; no engine change needed for song level; pack
+     level needs either B1/B2 code or the "._" rename (user-tested:
+     "._Pack" hides a pack, by side effect of the macOS filter). [CODE]
+
+PART C. DESIGN NOTES FROM THE PRE-PATCH SKETCH (compressed 2026-10-04)
+---------------------------------------------------------------------
+The pseudo-code that stood here is superseded by the built patches (Parts F,
+G); the patch files are the code. Ids C1-C5 are kept because other files cite
+them. Not compiled, not tested.
+C1. Pref "DisabledGroups": pack FOLDER names separated by ";", matched
+    case-insensitively like DisabledSongs; a name containing ";" cannot be
+    listed. Built as in Part F (a lower-cased map, no Group flag).
+C2. Hide (B1): built via UnlockManager::SongIsLocked -> LOCKED_DISABLED (Part
+    F); the sketch's Group::m_bEnabled flag was NOT used (reason in Part F).
+    Lua names as built: Group:IsEnabled (not GetEnabled), SONGMAN:
+    SetGroupEnabled/IsGroupEnabled/SaveEnabledSongs, Song:SetEnabled; docs
+    hand-written in LuaDocumentation.xml. SONGMAN can be null early in startup
+    (guarded in the patch). The group set must be applied in BOTH InitAll paths
+    (LoadAdditions re-runs InitSongsFromDisk, A11); the patch loads it there.
+C3. Skip (B2): built in LoadSongDir before SanityCheckGroupDir, Trace "Skipping
+    disabled pack". Skipped names never reach mapGroupSongDirs, so no Group,
+    AddGroup, series or banner work happens (A2, A3). Toggle-ON of a pack that
+    was never loaded needs LoadAdditions or a full Reload; toggle-OFF hides at
+    once (B1) and Reload(false) drops it from memory.
+C4. Toggle screens: group page lists on-disk pack folders plus loaded groups
+    (A5), built in Part G (GetAllPackFolderNames, On/Off rows, Start opens the
+    song page for loaded packs only). The sketch's separate switch row was not
+    used. Existing save path: ExportOptions saves per row (~120-125).
+    OPEN DECISION [CODE + INFERRED]: SaveEnabledSongsToPref drops DisabledSongs
+    entries for songs not loaded (by design), so per-song disables inside a
+    skipped pack are lost if the song toggle screen saves while the pack is
+    skipped. Options: merge old entries into the saved value, or accept the loss.
+C5. Interactions and risks (observations):
+    - Series: skipped packs behave like zero-song packs; hidden-but-loaded packs
+      still count in GetGroupsInSeries on beta (series notes 12a) [INFERRED].
+    - Scores persist for unloaded songs (A6) [INFERRED; test: disable a pack,
+      save the profile, check the XML still holds its scores].
+    - Last-played song and courses: resolved in H3.
+    - Preferences.ini is rewritten from the loaded preference registry on save;
+      hand edits only with the game closed.
+    - Beta: both engine patches apply cleanly (H1).
+    - Contribution: GitHub PRs against beta; keep the engine patch small (C1-C3
+      + Lua + docs) and the UI as a second PR [INFERRED; contribution rules not
+      read].
+
+PART D. TEST PLAN (for a built engine; I cannot build here, see 4g)
+-------------------------------------------------------------------
+  1. DisabledGroups=PackA hides PackA, song counts and random picks skip
+     it, other packs unaffected.
+  2. Same with skip (B2): Log.txt shows "Skipping ..." and no "Loaded N
+     songs from PackA"; startup time with a large library drops (measure).
+  3. Toggle off then on via UI; confirm the pack returns after LoadAdditions
+     or a full reload, and scores are intact.
+  4. Two packs in one Series, hide one: parent row and count correct.
+  5. Disable a song inside a pack, then disable and re-enable the pack:
+     the song stays disabled.
+  6. Reload(false) with a pack newly skipped: pack disappears, no crash;
+     profile rejoin works.
+  7. Empty and malformed DisabledGroups values (";;", spaces, unknown
+     names): ignored without error.
+
+PART E. STATE / NEXT STEPS
+--------------------------
+  - Sketch complete (Parts A-D) as of 2026-09-30. Nothing built.
+  - Open [TODO]: include cycle check for UnlockManager->SongManager;
+    en.ini keys; audit of other m_pSongs readers; compare files against
+    beta; Simply Love UI design (needs Lua setters first).
+  - If wanted next: (1) turn C1-C3 into an actual patch file against
+    v1.3.0 or beta (still cannot compile it here; would need a review
+    by someone who can build), or (2) go back to the set-aside to-dos
+    (engine notes section 6, items 7 "show one in row" and websocket
+    deflate, then second stage).
+
+PART F. PATCH IMPLEMENTED (2026-09-30, v1.3.0 tag 8a3bf8884a)
+-------------------------------------------------------------
+File: itgmania_pack_toggle_v1.3.0.patch (git diff, 6 files, +121 lines).
+Status: g++ -std=c++17 -fsyntax-only passes on SongManager.cpp, Group.cpp,
+UnlockManager.cpp, Song.cpp [CODE: run here, exit 0]. NOT linked, NOT run,
+NOT tested in game (no full build possible here, see engine notes 4g).
+Stages saved separately: pack_toggle_stage1..4.patch are cumulative diffs.
+Deviations from the sketch (Part C):
+  - No Group::m_bEnabled flag. State is SongManager::m_mapDisabledGroups
+    (lower-cased name -> name as written), loaded from pref DisabledGroups
+    in InitSongsFromDisk BEFORE LoadSongDir (so both hide and skip use it,
+    also in the LoadAdditions path). Reason: works before Group objects
+    exist and needs no per-load re-application. IsGroupEnabled returns true
+    immediately when the map is empty (no per-song cost by default).
+  - Hide: UnlockManager::SongIsLocked returns LOCKED_DISABLED when
+    !SONGMAN->IsGroupEnabled(pSong->m_sGroupName) (else-branch after the
+    song's own flag, so per-song state is untouched). Include cycle TODO
+    RESOLVED: UnlockManager.cpp already includes SongManager.h.
+  - Skip: LoadSongDir, before SanityCheckGroupDir, `continue` with a
+    Trace "Skipping disabled pack". Applies to every LoadSongDir call.
+    The skipped pack never reaches mapGroupSongDirs/AddGroup (sketch A2).
+  - SongManager::SetGroupEnabled(name,bool): updates map, writes pref,
+    PREFSMAN->SavePrefsToDisk().
+  - Lua (documented in LuaDocumentation.xml "since ITGmania 1.4.0"):
+    SONGMAN:SetGroupEnabled(name,bool), SONGMAN:IsGroupEnabled(name),
+    SONGMAN:SaveEnabledSongs(), Group:IsEnabled(), Song:SetEnabled(bool).
+    CORRECTION: the existing song binding is Song:IsEnabled(), not
+    Song:GetEnabled() (earlier notes, engine 7f and sketch C2, were wrong).
+    I named the new Group method IsEnabled to match.
+  - NOT done: C4 UI (toggle screens, service-menu line, theme sections,
+    on-disk pack listing). Planned as a separate second patch.
+Known limits / observations [INFERRED unless noted]:
+  - Un-skipping a pack that was never loaded needs a song reload before
+    songs appear; SetGroupEnabled(true) alone does not load it.
+  - A hidden-but-loaded pack still counts for beta's single-pack-series
+    rule (series notes 12a).
+  - SaveEnabledSongsToPref still drops DisabledSongs entries for songs not
+    loaded, so per-song disables inside a skipped pack are lost if the
+    song toggle screen saves while the pack is skipped (sketch C4).
+  - Group:IsEnabled() uses the folder name only; profile-loaded groups are
+    treated as enabled unless their name is listed.
+  - Pref value is trimmed per entry; names containing ";" cannot be listed.
+In-game checks: sketch Part D; plus Lua: SONGMAN:SetGroupEnabled("PackA",
+  false) from a test screen, then confirm the pack vanishes from the wheel
+  at once and "Skipping disabled pack" appears in Log.txt after a reload.
+
+PART G. UI PATCH (2026-10-01, written on top of Part F patch; v1.3.0)
+--------------------------------------------------------------------
+Files: itgmania_pack_toggle_ui_v1.3.0.patch (engine + _fallback theme, 5
+files from the baseline of patch 1, apply AFTER the Part F patch; verified
+`git apply` sequence on a clean v1.3.0 tree [CODE: run here]) and
+sl_toggle_songs.patch (Simply Love dd06138, 2 files, hand-applied text
+edits; verified `git apply --check` against SL dd06138). Stage files:
+ui_stage1.patch (C++), ui_stage2.patch (cumulative, adds _fallback).
+Status: g++ -fsyntax-only OK on SongManager.cpp and
+ScreenOptionsToggleSongs.cpp. NOT built, NOT run.
+What it does [CODE, written; behavior INFERRED]:
+  - SongManager::GetAllPackFolderNames: Songs/ directory listing (Strip
+    CVS/svn/mac forks) plus loaded group names, sorted, unique. Needed
+    because skipped packs are not in GetSongGroupNames (A5).
+  - ScreenOptionsToggleSongs (group page): one row per pack with choices
+    On/Off (m_bExportOnChange=true, so each change is saved to the
+    DisabledGroups pref at once via SetGroupEnabled; Export only writes
+    when the value differs, since the screen exports every row on exit).
+    Start opens the song page only for loaded packs; otherwise invalid
+    sound. Explanation key "Toggle Pack".
+  - _fallback: [ScreenOptionsToggleSongs] and [...SubPage] sections
+    (Class, Fallback=ScreenOptionsSimpleService, Prev/Next), service-menu
+    line LineToggleSongs added to [ScreenOptionsService] LineNames before
+    Reload; en.ini strings (explanations, option name, headers). Resolves
+    A9/A10 and the en.ini TODO.
+  - Simply Love: ToggleSongs added to the operator-menu LineNames, screen
+    sections with Fallback=ScreenOptionsServiceChild, OptionTitles/
+    Explanations/HeaderText strings. SL's own service overlay
+    (BGAnimations/ScreenOptionsService overlay) only looks up
+    "Screen<LineName>" LineNames, so the new line is skipped there safely
+    [CODE, read; not run].
+Wheel refresh [CODE]: MusicWheel builds its unfiltered lists in Load
+  (per ScreenSelectMusic creation), so On/Off changes show on the next
+  entry to song select. Un-skipping a pack that was never loaded still
+  needs "Reload Songs" (service menu; SL's sort-menu "Load New Songs" uses
+  LoadAdditions and would also add it, A11).
+Known limits [INFERRED]:
+  - Song page still saves with SaveEnabledSongsToPref, which drops
+    DisabledSongs entries for songs not loaded (C4 note).
+  - The existing header defines `std::string m_sGroup` inside namespace
+    ToggleSongs in a header (non-inline); fine while only one .cpp
+    includes it [CODE: not checked for other includers; compile passed].
+  - Many packs = many rows; no search/jump.
+  - ExportOnChange behavior of ScreenOptions with MakeNull handlers not
+    run-tested.
+Test additions: service menu > Toggle Songs shows every pack folder; set a
+  pack Off, back out, enter song select: gone; Preferences.ini shows
+  DisabledGroups=...; reload: Log.txt "Skipping disabled pack"; set On,
+  Reload Songs: pack returns; Start on a skipped pack = invalid sound.
+
+PART H. READER AUDIT AND BETA CHECK (2026-10-01)
+-----------------------------------------------
+Read on beta c8e69b9ca8 (tree checked out here). The patches target v1.3.0;
+the reader call sites below were NOT diffed against v1.3.0 [UNVERIFIED], but
+the song-reader code is old. Tags as elsewhere. Not built or run.
+
+H1. Patches vs beta [CODE: git apply --check]
+  - itgmania_pack_toggle_v1.3.0.patch applies cleanly to beta c8e69b9ca8;
+    the UI patch applies cleanly after it; sl_toggle_songs.patch applies
+    to Simply Love dd06138. NOT compiled on beta. (Project files carry the
+    names with underscores: ..._v1_3_0.patch.) Closes the "compare files
+    against beta" TODO for these two patch files.
+
+H2. Who reads SONGMAN->GetAllSongs()/GetSongs() and does the disabled flag
+    reach it? (flag = UnlockManager::SongIsLocked -> LOCKED_DISABLED, which
+    the patch extends to disabled packs) [CODE unless noted]
+  Honors it:
+    - MusicWheel (song lists; ~505/~1341 per A12).
+    - ScreenHighScores GetAllSongsToShow: NormallyDisplayed().
+    - ScreenJukebox: picks at random, then skips songs failing
+      NormallyDisplayed()/ShowInDemonstrationAndRanking().
+    - StepsUtil ~75/~139 (via SongCriteria::Matches, A12).
+    - ScreenOptionsEditCourse: SongUtil::FilterSongs with a criteria
+      object [INFERRED: Matches inside FilterSongs not re-read].
+    - EditMenu in Practice/CourseMods/Home modes (NormallyDisplayed filter).
+  Does NOT honor it:
+    - EditMenu in EditMode_Full: no filter, so hidden/disabled songs and
+      packs still show for editing (arguably wanted by editors). Skipped
+      packs are absent entirely.
+    - ScreenBookkeeping song-plays view: skips songs locked for OTHER
+      reasons (`& ~LOCKED_DISABLED`), so disabled songs ARE still counted.
+    - OptionRowHandlerListSongsInCurrentSongGroup (OptionRowHandler.cpp
+      ~810): no filter, and it reads vpSongs[0] without an empty check
+      (pre-existing). No hit in _fallback or Simply Love for the row name
+      "SongsInCurrentSongGroup", so likely unreachable in shipped themes.
+    - ScreenNameEntryTraditional demo path: random song from GetAllSongs,
+      no filter (also unguarded against 0 songs, pre-existing).
+    - SongUtil::GetAllSongGenres: genres of disabled songs included.
+    - CourseUtil ~306: group-course autogen sizes the entry list by
+      GetSongs(group).size() including disabled songs; entries are
+      criteria-based, so disabled songs fail Matches at play time and the
+      course may end up with fewer playable entries [INFERRED].
+    - Profile.cpp ~301/~365 and UnlockManager ~532/~557 iterate all songs;
+      fine (scores / auto-lock logic should see everything).
+  Counts: SONGMAN:GetNumSongs() counts all LOADED songs. Hide-only leaves it
+    unchanged; a skipped pack lowers it only after a reload/restart. Its
+    only theme users in _fallback + SL: Branches.lua StartGame and
+    OptionsEdit (GetNumSongs()==0 -> ScreenHowToInstallSongs) and SL's
+    title-menu text (BGAnimations/ScreenTitleMenu underlay/UserContentText
+    .lua). So: all packs disabled with hide-only -> normal flow with an
+    empty wheel; all packs skipped and reloaded -> the "how to install
+    songs" screen [INFERRED outcome; branch code read]. The title-menu
+    count will include hidden-but-loaded songs. No theme uses
+    GetNumUnlockedSongs (grep), so its odd definition (A12) has no
+    shipped consumer.
+
+H3. Last-played song / courses [CODE for the lines; INFERRED for behavior]
+  - GameState.cpp ~909: m_pPreferredSong = pProfile->m_lastSong.ToSong()
+    when none is set. RESOLVED 2026-10-02 [CODE: SongUtil.cpp ~1477
+    SongID::ToSong -> SongManager::GetSongFromDir ~1823]: a lookup in
+    m_SongsByDir (lower-cased path); returns nullptr for any song not
+    loaded, so a skipped pack gives null. A hidden-but-loaded pack gives a
+    real (locked) Song*.
+  - MusicWheel::SelectSongOrCourse (~305-326) tries the preferred song,
+    then the current song, then other fallbacks, so an absent preferred
+    song falls through. RESOLVED 2026-10-02 [CODE: MusicWheel.cpp
+    ~348-390]: SelectSong(p) returns false for null p, and (normal branch)
+    returns false when p is not in the sort's unfiltered item list, which
+    excludes disabled songs (A12). So hidden or skipped preferred songs
+    fall through to the current song, then courses, then the first
+    selectable item. EDGE [CODE; effect INFERRED]: in the SORT_PREFERRED /
+    SORT_METER branch with GAMESTATE->sLastOpenSection set, the loop only
+    looks for the SECTION name; if it exists the function breaks out, and
+    the final loop selects nothing when p is not on the wheel, yet the
+    function still returns true. Result: selection stays at its default
+    position instead of falling through. Not tested.
+  - m_lastSong is rewritten from m_pPreferredSong (GameState.cpp ~942), so
+    the profile keeps pointing into a skipped pack until another song is
+    played. CONFIRMED 2026-10-02 [CODE: GameState.cpp ~941 writes only
+    `if (m_pPreferredSong)`; with a null preferred song the old m_lastSong
+    stays]. Profile.cpp ~1135-1165 also carries m_lastSong across a
+    profile reset.
+  - Profile.cpp ~2996 is just the Lua method Profile:GetLastPlayedSong():
+    returns nil when ToSong is null, so a theme must handle nil [CODE].
+  - Courses [CODE: CourseLoaderCRS.cpp ~120-150, ~476-505]: a fixed #SONG
+    entry is resolved with SONGMAN->FindSong at course-load time. If the
+    song is not loaded (skipped pack) the entry is DROPPED with a
+    user-visible log "contains a fixed song entry ... that does not exist.
+    This entry will be ignored.", and the course is flagged m_bIncomplete.
+    Such courses still load with fewer entries; they are hidden only if
+    pref HideIncompleteCourses is on (default false; SongManager.cpp
+    ~1317). So a skipped pack silently shortens fixed-song courses.
+    SONGSELECT/criteria entries are not affected by load, only by what is
+    loaded. Hide-only: the songs ARE loaded, so FindSong succeeds and the
+    entry stays; whether trail building then rejects a disabled fixed
+    song was NOT read [UNVERIFIED]. Whether courses load after songs in
+    InitAll on every path was not re-checked [UNVERIFIED].
+
+H4. ToggleSongs header [CODE: git grep at v1.3.0 and on beta]
+  src/ScreenOptionsToggleSongs.h defines `std::string m_sGroup;` inside
+  namespace ToggleSongs (non-inline, external linkage). Only
+  ScreenOptionsToggleSongs.cpp includes the header (the other hit is the
+  CMake source list), so there is one definition and no link error today.
+  A second includer would produce a duplicate-symbol error. One-word safe
+  fix if ever needed: declare it `inline std::string m_sGroup;` (C++17;
+  the tree builds with C++17 per the syntax checks) [INFERRED]. The UI
+  patch does not touch this.
+
+H5. Still open for the toggle feature
+  - Compile and run on a real build (cannot here).
+  - Hide-only case for fixed-song courses (H3, last bullet) and the
+    SelectSong stale-selection edge (H3, 2nd bullet): code read, not run.
+  - (SongID::ToSong / SelectSong / skipped-pack course behavior: read
+    2026-10-02, see H3.)
+  - Beta: a skipped pack never registers, so beta's single-pack-series rule
+    (series notes 12a) can drop a parent row when the other pack of a
+    two-pack series is skipped; hide-only keeps the parent row (it counts
+    registered groups) [INFERRED from 12a].
+
+PART I. USER TEST RESULTS AND OPEN TEST LIST (2026-10-06/07)
+-----------------------------------------------------------
+Basis: user merged all patches (engine toggle + UI, wheel-timing, clang fix,
+sl_toggle_songs, sl_song_search_shortcut) into their ITGmania and Simply Love
+forks, installed the latest build and ran the checks below. [TESTED] = user-run.
+Not run by me. Full context: engine notes 7v.
+I1. RESULTS [TESTED]
+  - SL operator menu: "Toggle Songs" appears above "Reload Songs" and works;
+    row title, explanation text and header strings display; the pack list
+    includes packs that were disabled before load.
+  - Preferences.ini is updated as soon as a pack's On/Off is changed (before
+    leaving the screen), as designed (ExportOnChange).
+  - Start on a pack just turned Off (still loaded) opens the song page, also
+    after visiting song select; after an application restart the pack is
+    skipped and Start plays the invalid sound. Matches Part G.
+  - Log.txt shows "Skipping disabled pack" after a reload and no load lines
+    for that pack.
+  - Re-enabling restores the pack via service-menu "Reload Songs" and via SL's
+    "Load New Songs", without restarting the game.
+  - Scores reappear on song select; Stats.xml in MachineProfile and
+    LocalProfiles still holds them while the pack is skipped.
+  - Reload after freshly disabling a pack: no crash.
+  - Usability: usable but tedious with ~90 packs (no search/jump); possible
+    future tweak.
+  - Song search shortcut: F exists; searching a string works as through the
+    SortMenu route.
+I2. SIDE FINDING (not caused by the patches): service-menu Reload Songs clears
+    the saved P1 default profile (DefaultLocalProfileIDP1). Mechanism and tests:
+    engine notes 7v. Fix idea parked at the user's request.
+I3. STILL OPEN (numbering follows the 2026-10-06 question list; to be run
+    sequentially in a later chat)
+  12. Series of two packs, hide or skip one: parent row and count (beta:
+      hide-only keeps a parent row with one visible child; skipped drops it).
+  13. Disable a song, turn its pack Off and On: does the song stay disabled?
+  14. Song toggle screen saves while its pack is skipped: are that pack's
+      DisabledSongs entries lost (predicted, C4/G)?
+  15. Empty or odd DisabledGroups values (";;", spaces, unknown names): no error?
+  16. Same-name pack in an additional folder: one merged row? does skipping hide
+      it from every mount (engine notes 7p)?
+  17. Time "Reload Songs" against a normal startup.
+  18. Repeat the DisabledSongs duplicate-line test (game closed, two lines in
+      [Options]; code says LAST wins, user once saw FIRST win; engine notes 7l).
+  19. Last-played song inside a skipped pack: song select opens without a crash
+      and lands on a sensible item; Profile:GetLastPlayedSong() nil handled by SL?
+  20. Same with Preferred/Meter sort and a remembered open section (H3 edge).
+  21. Fixed-#SONG courses using a skipped pack: dropped with a log message?
+      With a hidden-only pack: does a fixed-song course still build a trail?
+  22. All packs skipped then reload: "How to install songs" screen? All hidden
+      (hide-only): empty wheel in normal flow?
+  23. Title-menu song count includes hidden-but-loaded songs?
+  24-26. DONE 2026-10-07 [TESTED]; see I4.
+  27-36. Search shortcut checks (engine notes 7m): F stops a held wheel
+      direction; Back closes the box and F works again; F does nothing with
+      sort menu / results / test input / leaderboard open; Ctrl+F and
+      Ctrl+Shift+F still jump to the letter (Title sort) with no box; nothing in
+      course mode or with KeyboardFeatures off; nothing when F is mapped to a
+      pad button; typing "f" in the box does not re-trigger and the opening F is
+      not typed; stale modifier flag (hold Ctrl, Alt-Tab away and back, then F:
+      ignored until the modifier is pressed and released once); non-US layout;
+      KeyboardFeatures help text shows the "press F" wording.
+  Suggested order (items 24-26 done): 12-14 first (code and reading least certain), then 19-21.
+
+I4. WHEEL-TIMING RESULTS, LARGER LIBRARY (2026-10-07) [TESTED = user-run log excerpts;
+    arithmetic and reading are mine, INFERRED]
+  - Item 24: LogWheelTimings=0 writes no WheelTiming lines [TESTED].
+  - Libraries: ALL ON 5406 songs / 168 groups; SKIP ~2200 songs (DisabledGroups,
+    packs skipped at load, so this is skip-at-load, NOT hide-only) 3211 songs /
+    146 groups (-40.6% songs, -22 packs).
+  - Build / filter in ms (all on -> skipped; skipped = two runs, second after
+    leaving to the title screen):
+      Series   70.1 / 7.9  -> 38.4, 38.4 / 5.0, 5.0
+      Group    77.4 / 8.0  -> 42.4, 42.6 / 4.9, 4.9
+      Title    31.1 / 8.1  -> 19.1, 18.4 / 5.0, 5.0
+      Artist   32.1 / 8.1  -> 18.6, 18.7 / 5.1, 5.0
+      Genre    19.1 / 8.0  -> 11.8, 11.6 / 5.0, 5.0
+      BPM      51.5 / 8.0  -> 29.3, 30.6 / 5.0, 5.0
+      Length   22.4 / 8.1  -> 13.6, 14.4 / 5.0, 5.0
+      Meter    52.6 / 30.6 -> 27.6, 27.1 / 17.2, 17.3 (items 20730 -> 11310)
+      TopGrades 23.2 / 8.0 -> 14.2, 14.8 / 5.0, 5.0
+      Popularity, Recent: 2-8 ms, ~0 filter, unchanged in kind (51 / 31 items).
+    Wheel Load (UpdatePopular + SortSongs): all on 32.7 + 24.2; skipped first
+    run 18.4 + 12.7, second run 12.1 + 6.5.
+  - Reading: build and filter scale about linearly with song count. Filter
+    ~1.5 us per item in both libraries (8.0 ms / 5406; 5.0 ms / 3211; Meter
+    30.6 ms / 20730). Build per item ~12-13 us (Series). Savings 37-48 percent,
+    close to the 41 percent fewer songs. Series build, Group build and Meter
+    (build + filter) are the largest costs: about 78 / 85 / 83 ms all-on vs
+    about 43 / 47 / 45 ms skipped. At 60 Hz one frame is 16.7 ms, so these are
+    a few dropped frames at a sort change, not a per-frame cost.
+  - Repeat behavior [CODE: patch readyWheelItemsData returns before the timing
+    code when the sort is already valid; MusicWheel::Load resets all statuses
+    to INVALID, per ScreenSelectMusic creation]: within one visit to song
+    select each sort is logged once (the first time it is chosen); returning
+    via the title screen rebuilds and logs again (built=1). This explains why
+    the all-on run logged only one set and the skipped run logged two.
+  - Repeat spread: the two skipped runs agree within about 1-2 ms (Series 38.35
+    vs 38.40, Group 42.4 vs 42.6, Title 19.1 vs 18.4). No cold-start penalty
+    in the first Series build here, unlike the 3484-song test (75.7 vs 51.3 ms;
+    engine notes 7n), so that earlier gap is not reproduced [n=1 each]. Load
+    is slower on the first run (cold caches, or SortSongs seeing unsorted
+    input) [UNVERIFIED which].
+  - Not measured: hide-only (songs loaded but disabled) timing; per-frame cost;
+    memory. Hide-only should still walk all loaded songs in Build [INFERRED].

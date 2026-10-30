@@ -1,0 +1,108 @@
+diff --git a/src/MusicWheel.cpp b/src/MusicWheel.cpp
+index dca2fb3..75174c1 100644
+--- a/src/MusicWheel.cpp
++++ b/src/MusicWheel.cpp
+@@ -1,6 +1,7 @@
+ #include "MusicWheel.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cstddef>
+ #include <map>
+ #include <set>
+@@ -47,6 +48,19 @@
+ 
+ static Preference<bool> g_bMoveRandomToEnd("MoveRandomToEnd", false);
+ static Preference<bool> g_bPrecacheAllSorts("PreCacheAllWheelSorts", false);
++// Debug aid: when enabled, logs how long building and filtering each wheel
++// sort takes, along with item counts. Off by default; when off, no clock reads
++// or log writes happen.
++static Preference<bool> g_bLogWheelTimings("LogWheelTimings", false);
++
++namespace {
++using WheelClock = std::chrono::steady_clock;
++
++double WheelElapsedMs(WheelClock::time_point start) {
++  return std::chrono::duration<double, std::milli>(WheelClock::now() - start)
++      .count();
++}
++}  // namespace
+ 
+ #define NUM_WHEEL_ITEMS ((int)std::ceil(NUM_WHEEL_ITEMS_TO_DRAW + 2))
+ #define WHEEL_TEXT(s) \
+@@ -148,14 +162,34 @@ void MusicWheel::Load(std::string sType) {
+   m_soundExpand.Load(THEME->GetPathS(sType, "expand"), true);
+   m_soundCollapse.Load(THEME->GetPathS(sType, "collapse"), true);
+ 
++  const bool bLogTimings = g_bLogWheelTimings;
++  WheelClock::time_point tLoad;
++  if (bLogTimings) {
++    tLoad = WheelClock::now();
++  }
++
+   // Update for SORT_MOST_PLAYED.
+   SONGMAN->UpdatePopular();
+ 
++  double popularMs = 0;
++  if (bLogTimings) {
++    popularMs = WheelElapsedMs(tLoad);
++    tLoad = WheelClock::now();
++  }
++
+   /* Sort SONGMAN's songs by CompareSongPointersByTitle, so we can do other
+    * sorts (with stable_sort) from its output, and title will be the secondary
+    * sort, without having to re-sort by title each time. */
+   SONGMAN->SortSongs();
+ 
++  if (bLogTimings) {
++    LOG->Trace(
++        "WheelTiming: Load songs=%d groups=%d UpdatePopular=%.3fms "
++        "SortSongs=%.3fms",
++        SONGMAN->GetNumSongs(), SONGMAN->GetNumSongGroups(), popularMs,
++        WheelElapsedMs(tLoad));
++  }
++
+   FOREACH_ENUM(SortOrder, so) { m_WheelItemDatasStatus[so] = INVALID; }
+ }
+ 
+@@ -1251,13 +1285,39 @@ void MusicWheel::readyWheelItemsData(SortOrder so) {
+     return;
+   }
+ 
++  // Timing starts only after the early return above, so the frequent
++  // "already valid" calls pay nothing.
++  const bool bLogTimings = g_bLogWheelTimings;
++  WheelClock::time_point t0;
++  if (bLogTimings) {
++    t0 = WheelClock::now();
++  }
++
+   std::vector<MusicWheelItemData*>& aUnFilteredDatas =
+       m__UnFilteredWheelItemDatas[so];
+ 
+-  if (m_WheelItemDatasStatus[so] == INVALID) {
++  const bool bBuilt = m_WheelItemDatasStatus[so] == INVALID;
++  if (bBuilt) {
+     BuildWheelItemDatas(aUnFilteredDatas, so);
+   }
++
++  double buildMs = 0;
++  if (bLogTimings) {
++    buildMs = WheelElapsedMs(t0);
++    t0 = WheelClock::now();
++  }
++
+   FilterWheelItemDatas(aUnFilteredDatas, m__WheelItemDatas[so], so);
++
++  if (bLogTimings) {
++    LOG->Trace(
++        "WheelTiming: sort=%s built=%d build=%.3fms filter=%.3fms "
++        "unfiltered=%d filtered=%d songs=%d",
++        SortOrderToString(so).c_str(), bBuilt ? 1 : 0, buildMs,
++        WheelElapsedMs(t0), static_cast<int>(aUnFilteredDatas.size()),
++        static_cast<int>(m__WheelItemDatas[so].size()), SONGMAN->GetNumSongs());
++  }
++
+   // The preferred sort's songs are subject to change during a session
+   // (particularly if two players have different preferred songs) thus it's
+   // status should remain invalid so the wheel items are rebuilt each time in

@@ -1,0 +1,283 @@
+ITGMANIA SONG LOADING, MEMORY, CACHES AND TIMING TABLES - FINDINGS
+==================================================================
+REVISION: 2026-10-12-a | file: itgmania_load_memory_findings.txt | bytes: 18407
+Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
+sections are copied with their IDs unchanged (4, 4a-4g, 7p, 7q, 7s). No new
+code findings.
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, read-only findings (nothing built; user checks listed
+                 in 4d, 7p, 7q).
+  VERSION BASIS: v1.3.0 8a3bf8884a unless stated; 7q and 7s also checked on
+                 beta (e4b4bf0755 / c8e69b9ca8).
+  TOPIC KEY:     memory, image cache, ImageCache, Demand/Undemand, note data,
+                 Steps::Compress, TimingData lookup tables, EnsureLookups,
+                 LoadSongDir order, VFS mounts, AdditionalSongFolders, cache
+  READ WHEN:     the task touches startup time, RAM use, banner cache modes,
+                 chart/timing data lifetime, or load order across song folders.
+  SEE ALSO:      engine notes v3 (architecture map, sections 2 and 6); toggle
+                 findings (7n, 7w: measured wheel timings); beta findings.
+Tags: [CODE] read in source, [INFERRED] reasoned, not run, [UNVERIFIED] not
+determined, [TESTED] user-run.
+
+
+4. PERFORMANCE / MEMORY FINDINGS (v1.3.0 unless noted)
+------------------------------------------------------
+Question asked: does section grouping limit what is held in memory, or only
+hide rows? ANSWER: it only hides rows. No measurement made.
+
+4a. Wheel layer [CODE]
+  - All songs' wheel data exists for each visited sort order (built once,
+    cached). Open/close of a section is O(total items) pointer work. The
+    refilter walk on each screen entry is O(total songs). Series sort adds
+    one header row per series (small, linear).
+
+4b. Chart (note) data lifecycle [CODE]
+  - Steps::Compress() frees m_pNoteData and m_sNoteDataCompressed when the
+    chart has a file on disk and is not a profile edit; skipped when
+    GAMESTATE->m_bInStepEditor; lights_cabinet charts stay resident;
+    profile-loaded edits are re-compressed in memory.
+    Steps::Decompress() re-reads/parses the simfile every time
+    (GetNoteDataFromSimfile) [INFERRED: repeated access = repeated disk
+    parse; not measured].
+  - Compress callers: Song::LoadFromSongDir tail (all Steps), SongManager::
+    Cleanup() (called from ScreenManager AfterDeleteScreen = EVERY screen
+    delete, after DeleteCachedTextures), ScoreKeeperNormal, Steps::
+    GetChartKey (Decompress, hash, Compress), Steps::DeAutogen.
+  - Always resident per chart (from cache-file tags): RadarValues,
+    TechCounts, NpsPerMeasure, NotesPerMeasure, PeakNps, Timing data,
+    NoteAnnotations (compressed base64 string). Chart-derived memory scales
+    with total charts x chart length even with note data released
+    [CODE for what is kept; magnitude UNVERIFIED].
+  - POSSIBLE BUG (by-value loop): Steps::Compress() does
+    `for (NoteAnnotationCache annotationCache : m_NoteAnnotations)
+     annotationCache.Compress();` which iterates COPIES, so the real caches'
+    `decompressed` vectors are never cleared. Once Steps::GetNoteAnnotations()
+    has been called on a chart its decompressed vector stays until the song
+    reloads. Same by-value pattern in GetAllNoteAnnotations (harmless).
+    Impact is limited to charts whose annotations are requested (4e: no
+    shipped theme does) [CODE for the loop; INFERRED for impact; not tested;
+    an observation, not a confirmed leak].
+
+4c. Banner / image memory [CODE]
+  - Pref "ImageCache" default IMGCACHE_LOW_RES_PRELOAD (PrefsManager.cpp).
+    Modes: OFF, LOW_RES_PRELOAD, LOW_RES_LOAD_ON_DEMAND, FULL.
+  - PRELOAD: every song's cached images are loaded into RAM at song-load time
+    and kept for the process (g_ImagePathToImage in ImageCache.cpp);
+    UnloadAllImages runs only on Undemand (on-demand mode) or shutdown/reload.
+  - Which images: theme metric [Common] ImageCache. _fallback = "Banner".
+    Simply Love = "Banner,Background,Jacket" only if its UseImageCache pref is
+    on (default OFF), else "Banner"; SL's help text says it uses "a LOT more
+    RAM" (recommends >= 8 GB).
+  - Cached size: each dimension halved then rounded to nearest power of two;
+    Banner capped at 256x128; stored 16-bit A1RGB5 (2 B/px) unless
+    PalettedImageCache (default false). A banner surface is at most 256*128*2
+    = 64 KiB (256x64 = 32 KiB). Rough total = songs-with-banners x 32-64 KiB,
+    e.g. ~10k banners = ~320-640 MB [INFERRED arithmetic; ImageTexture may
+    convert the surface and change the size; not measured].
+  - GPU: LoadCachedImage registers a TEX_VOLATILE texture and unloads it at
+    once; textures are created when shown; RageTextureManager::GarbageCollect
+    and DeleteCachedTextures drop zero-refcount textures on screen changes.
+    VRAM use is small; the RAM surfaces are the resident cost.
+  - Display: wheel song rows use TextBanner (text). The highlighted item's
+    banner goes through ScreenSelectMusic (g_sBannerPath) -> Banner::
+    LoadFromCachedBanner. Themes drawing images in wheel rows [UNVERIFIED].
+    With cache off/FULL or a missing cached texture, Banner loads the
+    full-size file from disk.
+
+4d. ImageCache Demand/Undemand (v1.3.0; re-checked on beta, 7s)
+  [CODE unless noted]
+  - Callers (complete grep of src/, no Lua binding): ScreenSelectMusic::
+    BeginScreen Demand("Banner") (~216); ~ScreenSelectMusic Undemand (~341);
+    EditMenu ctor path Demand (~147); ~EditMenu Undemand (~105).
+  - Mechanics (ImageCache.cpp ~92-135): global g_iDemandRefcount. Demand: ++;
+    returns if >1 or if pref != LOW_RES_LOAD_ON_DEMAND; else loads a cache
+    surface for every ImageData entry not already in g_ImagePathToImage.
+    Undemand: --; at 0 (and ON_DEMAND) calls UnloadAllImages(). In PRELOAD,
+    FULL and OFF modes they only change the refcount. In ON_DEMAND mode the
+    surfaces are resident only while a ScreenSelectMusic or EditMenu exists.
+  - ImageCache::OutputStats has NO callers in src/, so it cannot show size.
+  Observations [INFERRED, not tested]:
+    a) Demand passes dir "Banner" for EVERY entry, and g_ImagePathToImage is
+       keyed by path only; with Simply Love UseImageCache on
+       ("Banner,Background,Jacket"), Background/Jacket surfaces are probably
+       NOT demand-loaded (they fall back to disk loads in ON_DEMAND mode).
+    b) Song::TidyUpData (~727) calls IMAGECACHE->LoadImage per image dir with
+       no pref check, only when !from_cache. In ON_DEMAND mode, first-time
+       (uncached) song loads put surfaces into memory at startup, freed at
+       the first Undemand reaching 0 (first song-select exit). Cached loads
+       (~450) are guarded by == PRELOAD. One-time, uncached songs only.
+    c) ScreenSelectMusic is destroyed/recreated across gameplay: in ON_DEMAND
+       mode each return re-reads all banner cache files and each exit frees
+       them. Cost per re-entry not measured.
+  User check: ImageCache=LowResLoadOnDemand in Preferences.ini; watch RSS on
+    song select vs gameplay; compare with the default (LowResPreload).
+
+4e. Lua GetNoteAnnotations and theme use [CODE]
+  - Binding Steps:GetNoteAnnotations() (Steps.cpp ~1186; documented
+    ~6337 with "PlayerNumber pn") IGNORES its argument and always uses
+    PLAYER_1 (C++ says annotations do not support couples/routine yet).
+    Docs/binding mismatch: observation. A commit message says the Lua method
+    was added in a5c166ba26.
+  - No theme use: 0 hits for "NoteAnnotation" in _fallback and Simply Love
+    dd06138. So the by-value loop (4b) is not triggered by shipped themes
+    [INFERRED].
+
+4f. Per-song timing and background-change data [CODE unless noted]
+  - Cache files start with WriteGlobalTags(): song timing tags, #BGCHANGES /
+    #FGCHANGES (NotesWriterSSC.cpp ~328-361, ~572-610), then cache tags, then
+    per-chart tags (no note data).
+  - Loading from cache (NotesLoaderSSC.cpp ~1044-1060): the BGCHANGES handler
+    is NOT gated by from_cache, so background/foreground changes are kept for
+    every song. Song::m_SongTiming and each Steps::m_Timing stay resident; a
+    chart's timing is filled only if it has its own timing tags.
+  - TimingData (TimingData.h): one vector<TimingSegment*> per segment type
+    (heap segments) plus two mutable lookup tables m_beat_start_lookup and
+    m_time_start_lookup, built by EnsureLookups() on first beat<->time query
+    with (bpm+warp+stop+delay segments + 1) entries each; cleared only by
+    InvalidateLookups() on edit. Nothing clears them on Compress or Cleanup.
+  - Size [INFERRED arithmetic]: ~40 B per entry (reconstructed lookup_item_t/
+    GetBeatStarts, compiled with g++ x86-64: 36 + 40); two tables x (N events
+    + 1) x 40 B, e.g. N=100 = ~8 KB per timing object, plus segments.
+  - WHEN tables exist: a cached load builds NONE; a parsed load builds them at
+    once; later lazily. See 7q. Library-wide magnitude: NOT measured.
+
+4g. Measuring startup time / RSS here: not feasible [checked 2026-09-29]: 1
+  CPU, ~3 GB RAM, ~9 GB disk, no cmake/clang, extern/ submodules (ffmpeg,
+  aubio, ...) empty after clone, no real display/GL. Use the in-game
+  procedure in 4d.
+
+
+7p. LOAD ORDER ACROSS SONG DIRS (2026-10-03, v1.3.0; beta same) [CODE unless tagged]
+  - ONE LoadSongDir call: InitSongsFromDisk -> LoadSongDir(SpecialFiles::
+    SONGS_DIR) (SongManager.cpp:280). Extra folders are virtual-filesystem
+    mounts (StepMania.cpp ~826-835): AdditionalFolders ReadOnly/Writable at "/",
+    AdditionalSongFolders ReadOnly/Writable at "/Songs" (same for Courses),
+    then MountTreeOfZips(Packages). Deprecated AdditionalFolders /
+    AdditionalSongFolders prefs are copied to the Writable ones
+    (PrefsManager.cpp ~548-552). Saved song IDs starting "AdditionalSongs/" are
+    rewritten to "Songs/" (SongUtil.cpp ~1501).
+  - Listing: RageFileManager::GetDirListing asks every mount, then if more than
+    one returned entries, sorts and de-duplicates case-INsensitively. So a pack
+    folder in Songs/ and in an extra folder is ONE pack; its song folders are
+    the union; a song folder in both is ONE song. Names differing only in case
+    collapse; which spelling survives is unspecified (std::sort not stable)
+    [INFERRED].
+  - Read priority: AddFilesystemDriver inserts at the FRONT of g_pDrivers, so
+    the most recently mounted driver is asked first; Open, GetFileSizeInBytes
+    and GetFileHash take the first driver that has the file. Mount order: base
+    Songs dir, additional folders, additional song folders, Packages zips. Later
+    mounts win per FILE, not per folder [INFERRED consequence: a split pack can
+    take Pack.ini from one mount and the banner from another; zips outrank
+    loose files]. Not read: Mount() duplicate handling, zip mount points,
+    platform hooks.
+  - Load order: pack names go into std::map mapGroupSongDirs (byte order,
+    case-sensitive) regardless of mount (matches 3a). Songs per pack: merged
+    listing, SortRStringArray. Loading is parallel but the main thread consumes
+    results in index order, so AddSongToList and m_mapSongGroupIndex order is
+    deterministic. Group objects (Pack.ini via VFS) are created in the same
+    map loop.
+  - Consequence: no "earlier directory wins" rule; SeriesBanner resolution
+    depends only on merged pack folder names.
+  - Cache: song paths are "Songs/<pack>/<song>/" whatever the mount;
+    GetHashForDirectory hashes the merged listing with per-file hashes from the
+    first driver that has each file [CODE; not tested].
+  - Toggle patch: skip uses the merged pack name, so it hides the pack from
+    every mount; GetAllPackFolderNames lists GetDirListing("Songs/*"), also
+    merged, so extra-folder packs appear in the toggle UI [INFERRED].
+  - USB custom songs load in Profile::LoadSongsFromDir (Profile.cpp
+    ~1196-1250; needs CustomSongsEnable and a memory card) into Profile::
+    m_songs with their own Group, not via LoadSongDir.
+  - User checks: Log.txt "Loading songs using N threads" once per load. Put a
+    pack with the same folder name as one in Songs/ into a folder listed in
+    AdditionalSongFoldersWritable with a different Pack.ini: songs should
+    merge into one pack row; check which Pack.ini wins. Put the same song
+    folder in both: expect one entry.
+
+7q. CACHED-LOAD TIMING LOOKUP TABLES (2026-10-03; v1.3.0, beta same) [CODE unless tagged]
+  Resolves the open point in 4f. Not run; no memory measured.
+  - The tables (TimingData::m_beat_start_lookup / m_time_start_lookup) are
+    built only by EnsureLookups(), whose two callers are
+    GetBeatAndBPSFromElapsedTimeNoOffset (~798) and GetElapsedTimeFromBeatNoOffset
+    (~872), i.e. every beat<->time query; one query materializes both.
+    GetActualBPM, HasStops etc. and the C++ BPM display do not call it.
+  - CACHED LOAD BUILDS NONE. Song::LoadFromSongDir cached branch (Song.cpp
+    ~310-352): SSCLoader::LoadFromSimfile(from_cache=true), then
+    SMLoader::TidyUpData(song, true) -> Song::TidyUpData(true). There the timing
+    work is m_SongTiming.TidyUpData(false) and per chart Timing.TidyUpData(true);
+    TimingData::TidyUpData (~1046) only CLEARS lookups and fills default
+    segments. The queries in TidyUpData (sample start ~871-882) and
+    ReCalculateStepStatsAndLastSecond (~1134) are inside `if (!from_cache)`
+    (brace depth checked by script); the song-background GetLastBeat query is
+    skipped by `if (bFromCache) break`. Nothing after queries timing.
+  - PARSED (UNCACHED) LOAD BUILDS THEM at once: !from_cache TidyUpData calls
+    ReCalculateStepStatsAndLastSecond(true) (~1157-1195), which per chart runs
+    Steps::CalculateStepStats (radar, tech counts via StepParityGenerator,
+    measure info; uses GetElapsedTimeFromBeat) and queries
+    GetElapsedTimeFromBeatNoOffset for non-autogen, non-edit charts with notes.
+    Tables then persist until the song is freed or its timing edited
+    (InvalidateLookups callers: Clear/Copy, AddSegment, ShiftRange, ClearRange,
+    MultiplyBPMInBeatRange, ScaleRegion, InsertRows, DeleteRows, TidyUpData);
+    nothing in Steps::Compress or SongManager::Cleanup clears them [INFERRED
+    from the two-caller rule].
+  - Which object: Steps::GetTimingData() returns the song timing when the
+    chart's own m_Timing is empty (Steps.cpp ~669), so most queries land on
+    Song::m_SongTiming; a separate table exists only for charts with own timing.
+  - Copies carry no tables: the TimingData copy ctor/operator= call Copy(),
+    which re-adds segments via AddSegment (empty lookups). Autogen charts
+    (Steps::AutogenFrom) and GameSoundManager::PlayMusic (copies the timing it
+    is given, ~712; ScreenSelectMusic passes &pSong->m_SongTiming ~1864, ~1895)
+    build separate, short-lived tables.
+  - Later (lazy) builders: gameplay/editor code (Player, SongPosition,
+    ScreenGameplay, Background/Foreground via Song::GetFirstBeat/GetLastBeat,
+    NoteField, ArrowEffects, ScreenEdit, GameState::GetSongPercent); no direct
+    timing query in ScreenSelectMusic or MusicWheel. Lua: TimingData:
+    GetBeatFromElapsedTime / GetElapsedTimeFromBeat, Song:GetFirstBeat /
+    GetLastBeat. Simply Love dd06138: Scripts/SL-Histogram.lua gen_vertices
+    calls Steps:GetTimingData():GetElapsedTimeFromBeat(0) and one query per
+    measure; NPS_Histogram is used on ScreenSelectMusic (overlay/PerPlayer/
+    DensityGraph.lua), gameplay, evaluation and practice; the song-select
+    graph's RedrawCommand is chained with the original (02 ActorDef.lua
+    MergeTables) [CODE; INFERRED that highlighting a song builds its timing
+    tables once chart data is parsed; whether a hidden graph still redraws
+    was not read]. metrics.ini ~2142 ([Background] RandomBGStartBeat) calls
+    Song:GetFirstBeat when the Background is built (gameplay). So in SL the
+    song timing of each HIGHLIGHTED song gets tables; the library as a whole
+    does not.
+  - Beta: TimingData.cpp/.h and GameSoundManager.cpp byte-identical to v1.3.0;
+    NotesLoaderSM.cpp and ScreenSelectMusic.cpp timing use unchanged; Song.cpp
+    differs only in image-cache code (7s); Steps.cpp in couples/annotation code;
+    NotesLoaderSSC.cpp grep-only (no timing/cache terms in the diff).
+  - Size per timing object: as 4f. Resident tables scale with songs parsed in
+    this run plus songs highlighted or played, not with library size on a
+    cached start. Not measured.
+  - Optional user check: compare RSS at the title screen after (a) a startup
+    with all songs cache-valid and (b) a startup right after deleting
+    Cache/Songs; the difference includes tables AND parsed chart data (upper
+    bound).
+
+7s. IMAGE-CACHE RE-CHECK ON BETA + PR #1488 CLOSE REASON (2026-10-03)
+  [CODE unless tagged]
+  - Scope: `git diff --stat v1.3.0 beta` shows no change in ImageCache.cpp/.h,
+    Banner.cpp/.h, EditMenu.cpp, PrefsManager.cpp; ScreenSelectMusic.cpp differs
+    only in DetectCodes; only Song.cpp differs, by 4101049b92 (Arthur Eubanks,
+    2026-09-30, "Some image cache loading cleanups", +23/-65).
+  - 4c/4d STILL HOLD ON BETA: default LOW_RES_PRELOAD (PrefsManager.cpp:186);
+    Demand/Undemand and the refcount byte-identical; same four callers; Demand
+    still passes one dir name (4d a); the cached-load guard (~450) and the
+    unguarded TidyUpData call (~727, !from_cache only) unchanged apart from
+    `const std::string&` loop variables (4d b).
+  - What 4101049b92 changes: (a) Song::GetCacheFile(type): v1.3.0 built a map of
+    six predefined paths per call and tested `if (PreDefs[...].c_str())`,
+    always true, so the directory-scan fallback below it was unreachable
+    [CODE; INFERRED no case reaches it]; beta uses an if-chain over the same six
+    getters (Banner, Background, CDTitle, Jacket, CDImage, Disc); unknown type
+    returns "". (b) Song::GetSongAssetPath: the DoesFileExist check now comes
+    AFTER the "no '/' in the name" shortcut; same results, one fewer existence
+    check for plain file names (also backs GetMusicPath, GetBannerPath etc.;
+    callers not enumerated; saving not measured). (c) two by-value ImageDir
+    loops became const references.
+  - PR #1488 (series notes 12c): closed 2026-09-09 by its author after teejusb
+    pointed to #1447 as already fixing it; author could not reproduce on a
+    rebuilt branch [WEB, page fetched]. Link between #1447 and 05507f6b40 not
+    checked [UNVERIFIED].

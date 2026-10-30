@@ -1,0 +1,372 @@
+ITGMANIA EDITOR: WAVEFORM AND "ADJUST SYNC" - WORKING NOTES (beta, NOT in v1.3.0)
+==============================================================================
+REVISION: 2026-10-11-a | file: itgmania_editor_notes.txt | bytes: ~21.9k (approx.; header added 2026-10-11, body as of 2026-10-03-a)
+ 
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE, complete for its topic (in-game checks only).
+  VERSION BASIS: itgmania beta head 28e58a78c7 (re-checked on c8e69b9ca8);
+                 both features ABSENT from v1.3.0.
+  TOPIC KEY:     editor, ScreenEdit, waveform, NoteField, Adjust Sync,
+                 TempoDetector, BPM detection, aubio, split timing
+  READ WHEN:     the task touches the step editor's waveform, the Adjust
+                 Sync / Find BPM menu, or timing-mode behaviour.
+  SEE ALSO:      itgmania_editor_clipboard_mouse_notes.txt (undo, clipboard,
+                 mouse; resolves the undo question in Part 2 section 3).
+ 
+Basis:    Source code of itgmania/itgmania branch "beta", head 28e58a78c7
+          (committed 2026-09-26), read on 2026-09-29, plus git log.
+          Version string on beta is 1.4.0 (commit e2fcbf4155).
+          Both features are ABSENT from v1.3.0 (they are beta-only).
+Not done: I did not build or run the game or the editor. I did not read
+          the PR discussion threads. TempoDetector.cpp helpers were read in
+          full on 2026-10-03 (Part 2 section 4b) and the detector core was
+          run on synthetic click tracks; real songs were not tested.
+Docs:     grep of Docs/ on beta finds no mention of either feature.
+          (Docs/ on beta differs from v1.3.0 only in Luadoc/Lua.xml and
+          LuaDocumentation.xml.)
+ 
+Confidence tags:
+  [CODE]       read directly in the source; file/function given
+  [INFERRED]   my reading of how the code would behave; not tested
+  [UNVERIFIED] something I could not determine
+ 
+Author per git: "Crash Cringle" for both features (commits below).
+ 
+ 
+PART 1. AUDIO WAVEFORM IN THE STEP EDITOR
+=========================================
+ 
+1. What it is
+-------------
+A waveform of the song's audio is drawn behind the beat bars in the step
+editor's note field. [CODE: NoteField.cpp DrawWaveform, called from the
+note field draw routine ~line 1098]
+ 
+History [CODE, git log]:
+  953de9c1bb 2026-08-22  Add audio waveform to the editor
+  a761ed284b 2026-08-22  Add Toggle Waveform to the Help Pane
+  7e92b64a1f 2026-08-22  Account for Split Timing in da waveform
+  0c89d6f6b4 2026-08-22  Consolidate help pane options a bit
+  479423989e 2026-09-04  Move ThemeMetrics to the top, add metric to
+                         disable waveform
+ 
+2. How the player/editor uses it
+--------------------------------
+  - Toggle key: CTRL + G (either Ctrl). Mapped as EDIT_BUTTON_TOGGLE_WAVEFORM
+    to KEY_Cg with a Ctrl hold. [CODE: ScreenEdit.cpp ~756-761]
+    It shows a system message "Waveform - Shown." / "Waveform - Hidden."
+    [CODE: ScreenEdit::ToggleWaveform]. The edit help pane lists it as
+    "Toggle waveform display". [CODE: ScreenEdit.cpp ~7749]
+  - Initial state comes from the theme metric [NoteField] ShowWaveform,
+    default true in _fallback. [CODE: NoteField.cpp constructor,
+    metrics.ini ~1093] The toggle is not saved anywhere I found; it is
+    just the NoteField's m_bShowWaveform member. [CODE: the only caller of
+    SetShowWaveform is ToggleWaveform] So it resets to the metric value
+    each time the editor screen is created. [INFERRED]
+  - The waveform is loaded only into the editor's note field
+    (m_NoteFieldEdit). [CODE] The header comment in NoteField.h says it is
+    shown "only while actively editing steps, not while
+    playtesting/recording", but I found no code that switches it off for
+    playtest; the playtest/record fields simply never have a waveform
+    loaded. [CODE for the loads; INFERRED for the effect]
+ 
+3. Theme metrics (group [NoteField]; defaults from _fallback/metrics.ini)
+-------------------------------------------------------------------------
+  ShowWaveform=true                       initial visibility
+  WaveformColor=color("0.4,0.75,1,0.6")   base color (with alpha)
+  WaveformWidthPercent=0.88               max width as a fraction of the
+                                          field width
+  WaveformGain=1                          amplitude multiplier (result
+                                          clamped to +-1)
+  WaveformPointsPerPixel=2.4              detail level (see 5)
+  [CODE: NoteField.cpp ~64-70; metrics.ini ~1093-1097]
+  Note: the beta commit message says the metric "disables" the waveform.
+  What the code does is set the INITIAL visibility; the player can still
+  toggle it with CTRL+G. [CODE]
+ 
+4. When the audio is loaded
+---------------------------
+  NoteField::LoadWaveform(path) is called:
+    - when the editor screen is initialised (ScreenEdit.cpp ~2090)
+    - when the player switches to another chart in the editor (~3453)
+    - after "revert from disk" (~7397)
+  The path is the CHART's music path (m_pSteps->GetMusicPath()), not the
+  song's. Commit 7e92b64a1f made this change so charts with their own
+  music/split timing get the right audio. [CODE]
+  LoadWaveform decodes the ENTIRE audio file synchronously into memory:
+  it opens it with RageSoundReader_FileReader, reads it in 4096-frame
+  chunks, and appends every sample to two std::vector<float> (left and
+  right; a mono file is duplicated into both). [CODE: NoteField.cpp
+  LoadWaveform ~145-195]
+  Observations [INFERRED, not measured]:
+    a) Memory: 8 bytes per frame (two floats). A 3-minute file at
+       44.1 kHz is about 7.9 million frames = about 63 MB; a 10-minute
+       file about 212 MB. Arithmetic only; not measured.
+    b) The decode is not gated by the ShowWaveform metric or the toggle:
+       LoadWaveform has no such check, and the call at ~2090 is
+       unconditional. So with ShowWaveform=false the audio is still
+       decoded and kept in memory. [CODE for the missing check;
+       INFERRED for the consequence]
+    c) The decode runs on the main thread, so opening the editor (or
+       switching chart, or reverting) may pause for the decode time of
+       the file. Not measured.
+    d) The data is freed by UnloadWaveform() (called at the start of every
+       LoadWaveform) or when the NoteField is destroyed.
+    e) If the file cannot be opened, a warning is written to the log
+       ("NoteField: couldn't load waveform for ...") and no waveform is
+       drawn. [CODE]
+ 
+5. How it is drawn
+------------------
+[CODE: NoteField.cpp DrawWaveform ~663-790]
+  - Only the samples between the first and last visible row are used.
+    Time for those rows comes from the "NoOffset" timing calls
+    (GetElapsedTimeFromBeatNoOffset), so the waveform is not shifted by
+    the player's Global Offset preference. The code comment says this is
+    on purpose. Timing used is the displayed timing (song or step timing).
+  - The visible samples are reduced to about
+    (visible pixels x WaveformPointsPerPixel) points; each point takes the
+    min and max of its window of samples.
+  - Each point becomes a symmetric horizontal bar: the half-width is
+    WaveformWidthPercent x half the field width x max(|min|,|max|) x
+    WaveformGain. So the picture is an amplitude ENVELOPE mirrored around
+    the center, not the true positive/negative wave shape.
+  - Stereo files draw two overlapping strips (left, right), each at 65%
+    alpha; mono draws one strip.
+  - Position on screen follows ArrowEffects (so it scrolls with the notes
+    and follows the field's reverse/zoom state).
+  - It is drawn behind the beat bars, and skipped for the non-master
+    player's field in a shared-sides style (suppress_shared_overlays).
+  Observation [INFERRED]: the per-frame cost grows with the number of
+  visible samples (the window is scanned each draw before reduction), so
+  heavy zoom-out shows more audio per frame. Not measured.
+ 
+6. Things I would check in-game
+-------------------------------
+  1. CTRL+G toggles the waveform and shows the system message.
+  2. With ShowWaveform=false in the theme metrics: waveform starts hidden;
+     CTRL+G still shows it; check whether memory is still used (see 4b).
+  3. Load time on a very long audio file (10+ min): pause on entering the
+     editor and on switching charts.
+  4. A chart with its own music file: waveform matches that file after
+     switching charts.
+  5. Song with a Global Offset set: waveform position relative to notes
+     should not change when the offset preference changes.
+  6. Playtest ("play whole song"): no waveform in the playfield.
+ 
+ 
+PART 2. "ADJUST SYNC" (BPM AND OFFSET DETECTION)
+================================================
+ 
+1. What it is
+-------------
+An editor main-menu entry, "Adjust Sync", that analyses the chart's audio,
+suggests up to 3 BPM/offset pairs, and lets you apply one. It is a port of
+ArrowVortex's "Find tempo". [CODE: src/TempoDetector.h header comment;
+commit 6396a015f6 2026-08-22 "Add Adjust Sync ported from ArrowVortex"]
+Uses the aubio library (added as extern/aubio, a submodule on beta by
+commit d564c36484). [CODE]
+ 
+Naming note: the engine already has a class/feature called AdjustSync
+(the in-game "adjust sync" after-song save-offset prompt; src/AdjustSync.*).
+This new menu item is unrelated to it apart from the name; ScreenEdit
+already used AdjustSync::* calls for the song-end prompt. [CODE:
+ScreenEdit.cpp ~4381-4447; the new menu handler is
+ScreenEdit::HandleAdjustSyncMenuChoice]
+ 
+2. How to use it
+----------------
+  - Open the edit main menu; the row is "Adjust Sync", visible in
+    EditMode_Full only (not in Practice mode). [CODE: ScreenEdit.cpp
+    ~1134, MenuRowDef with EditMode_Full]
+  - The sub-menu ("ScreenMiniMenuAdjustSyncMenu") first shows "Find BPM".
+    Choosing it starts analysis and shows the system message "Analyzing
+    music, this may take a moment...". [CODE]
+  - When the analysis finishes, ScreenEdit::Update reopens the menu
+    automatically with the results. [CODE: ScreenEdit.cpp ~2269-2276]
+    Each result is three rows: "Apply Sync #N  <percent>", "Offset  <value>",
+    "BPM  <value>". The percent is the result's share of confidence among
+    the returned results (all results sum to 100%), NOT an absolute
+    accuracy score. [CODE: TempoDetector.cpp Run, fitness normalisation]
+  - If nothing is found, the message is "No BPM could be detected for this
+    music." [CODE]
+  - Choosing "Apply Sync #N" does exactly this [CODE:
+    ScreenEdit::HandleAdjustSyncMenuChoice ~5799]:
+        timing.m_fBeat0OffsetInSeconds = result.offset
+        timing.AddSegment(BPMSegment(0, result.bpm))
+        SetDirty(true)
+    and shows "Applied %.3f BPM with an offset of %+.3f."
+    "timing" is GetAppropriateTimingForUpdate(). RESOLVED 2026-10-02
+    [CODE: ScreenEdit.cpp ~5633, Song.cpp ~1919, TimingData.cpp ~134;
+    beta c8e69b9ca8]: the choice depends on the editor's TIMING MODE
+    flag GAMESTATE->m_bIsUsingStepTiming, NOT on whether the chart has
+    its own timing.
+      - Flag false: result goes to the SONG timing (m_pSong->m_SongTiming).
+      - Flag true: result goes to the CHART timing (m_pSteps->m_Timing).
+        If that chart has no segments of its own (m_Timing.empty(): no
+        segment of ANY type), the song timing is first COPIED into the
+        chart, so the chart silently becomes a split-timing chart and the
+        song timing is left unchanged.
+      - Flag at editor entry: false, set true only if the chart already
+        has its own timing (IsStepsUsingDifferentTiming = !m_Timing.empty()).
+        The player toggles it with EDIT_BUTTON_SWITCH_TIMINGS. The flag is
+        set true again when leaving the editor (the default state).
+      - Same function serves every other timing edit (BPM, stops, offset
+        keys), so Adjust Sync follows the same mode as them.
+    AddSegment(BPMSegment(0,bpm)) overwrites/merges a BPM already at row 0
+    [CODE: TimingData.cpp ~468-545 read to the redundant-segment logic;
+    the tail of the function not read].
+ 
+3. What Apply does NOT do
+-------------------------
+  [CODE for what the function contains; INFERRED for implications]
+  - It sets one BPM at beat 0 and the offset. It does not remove other BPM
+    changes, stops, delays or warps. So on a song that already has tempo
+    changes, applying a result changes only the beat-0 BPM and the offset;
+    the rest of the timing is left in place. The tool assumes one constant
+    tempo for the whole song.
+  - It does not call SaveUndo(). Most timing edits in ScreenEdit also do
+    not (only 11 SaveUndo calls exist in the file; e.g. the BPM up/down
+    keys ~3495 do not), so this is consistent with existing behaviour,
+    but you cannot count on Undo to reverse an applied result. [CODE for
+    the calls. RESOLVED 2026-09-30: undo history holds note data only,
+    so it never covers timing changes; see itgmania_editor_clipboard_mouse_notes.txt
+    section 3. Also: 10 call sites, not 11 (11 lines incl. the definition)]
+  - It marks the file dirty only; nothing is saved until you save.
+ 
+4. How the analysis works (summary of the code)
+-----------------------------------------------
+[CODE: src/TempoDetector.cpp; header comment says it ports ArrowVortex
+ src/Editor/FindTempo.cpp]
+  - Audio is decoded on the MAIN thread inside TempoDetector::Create
+    (DecodeMono), then analysis runs on a background std::thread.
+    Decode mixes to mono, converts through 16-bit values as ArrowVortex
+    does, and reads at most 600 seconds (10 minutes) of audio
+    (MaxAnalysisSeconds). Longer songs are analysed only up to 10 minutes.
+  - Note onsets are found with aubio (method "complex", buffer size
+    1024, hop size 256).
+  - BPM candidates are searched between MinimumBPM=89 and MaximumBPM=205.
+    A song whose true tempo is outside that range is reported as a
+    multiple/fraction inside it: RESOLVED 2026-10-03, see section 4b.
+    [CODE for the constants]
+  - At most 3 results are returned, best first. If the top two are very
+    close (ratio under 1.05) a second scoring pass is used to re-rank.
+    [CODE: ~578-590]
+  - The offset for each BPM is then chosen, comparing the offset with the
+    half-beat offset and picking the one with more onset support.
+  - The result offset is sign-flipped at the end so it matches the simfile
+    convention (m_fBeat0OffsetInSeconds), per the code comment.
+  - Progress text stages: "Looking for onsets", "Scanning intervals",
+    (two more stages), "Calculating offsets", "Done". [CODE]
+  - The analysis object is deleted when it finishes, and also in the
+    ScreenEdit destructor, which blocks until the thread stops. [CODE]
+  Observation [INFERRED, not measured]: the mono copy holds 4 bytes per
+  frame, up to about 106 MB for a 10-minute 44.1 kHz file, only while the
+  analysis runs (plus the editor's own waveform buffers, Part 1).
+ 
+4b. BPM RANGE, "FOLDING", DUPLICATES, FIRST-100 WEIGHTING (2026-10-03)
+----------------------------------------------------------------------
+Basis: beta c8e69b9ca8, src/TempoDetector.cpp read in full (IntervalTester
+~302, GetConfidenceForInterval ~359, RemoveDuplicates ~483, CalculateBPM
+~516, Run ~823). Compared with upstream ArrowVortex FindTempo.cpp (raw files
+fetched from the uvcat7/ArrowVortex and StepMania-AMX/ArrowVortex repos).
+[CODE unless tagged]
+  a) NO folding code exists. The range 89-205 BPM (ratio 2.30) only limits
+     which beat INTERVALS are tested (samplerate*60/BPM). Onset positions
+     are wrapped modulo the candidate interval, so true tempo T also scores
+     at multiples/fractions of itself (T/2, 2T, 3T/2 ... depending on the
+     onsets). The search reports whichever candidates inside 89-205 score
+     best, so "folding" is a side effect of periodicity, not a rule.
+     [INFERRED explanation; the behaviour in b) is TESTED]
+  b) TESTED (synthetic, see c). Beat-only click tracks, first click 0.123 s:
+       400 s tracks:  60 -> 120 (38%), 180, 150    70 -> 140, 105, 175
+                      90 -> 90 (59%), 135          100 -> 100, 150, 125
+                      240 -> 120 (76%), 160
+       90 s tracks:   75 -> 150 (x3 near-duplicates); 85 -> 170 (x3);
+                      89 -> 89, 178.11, 177.86;   100 -> 100, 199.89, 150
+                      120 -> 120, 180;  150/170/200/205 -> themselves only
+                      210 -> 105;  240 -> 120;  256 -> 128;
+                      300 -> 150 (71%), 100 (29%)
+       With soft 8th-note clicks added (90 s): 60 -> 120, 180; 90 -> 180;
+                      140 -> 140, 93.33; 180 -> 180, 120.
+     Reading: below 89 usually reported at 2x (3x and 2.5x also appear);
+     above 205 at 1/2 (or 1/3). Between 89 and ~102 the double (also in
+     range) can compete with the true tempo [INFERRED from 2T <= 205].
+     Detected offset was within ~4 ms of the true first click (sign flipped
+     as in Run). When a 1/2 candidate is chosen the offset may land on a
+     half beat of the true tempo (240 -> 120 gave 0.369 instead of 0.119 s):
+     equally valid on that grid.
+  c) Harness (NOT the full class: no decoder, no thread, system aubio):
+     copy the anonymous-namespace core of TempoDetector.cpp (from "typedef
+     double real;" up to before "short ToShort"), add a main() that builds
+     44.1 kHz mono clicks (2000-sample decaying noise bursts), then calls
+     FindOnsets, the first-100 strength loop, CalculateBPM and
+     CalculateOffset as Run() does. Built with g++ -std=c++17 -O2 against
+     apt libaubio-dev 0.4.9. Beta pins extern/aubio at 152d6819b3 (submodule
+     not checked out here), so the aubio version may differ [UNVERIFIED].
+     Synthetic clicks are far cleaner than music; real songs untested.
+  d) RemoveDuplicates (same code and 0.1 tolerance as upstream) walks the
+     fitness-sorted list and deletes any LATER entry within 0.1 BPM of an
+     earlier entry's BPM, double, or half. Consequences:
+       - if 2T outscores T, the TRUE tempo T is deleted and never shown
+         (seen: true 90, 90 s track -> 180, 180.17, 135) [CODE + TESTED;
+         that the deletion is what removed 90 is INFERRED];
+       - only factors 2 and 1/2 are handled; 1.5x, 3x, 2/3x siblings stay;
+       - the 0.1 absolute tolerance runs BEFORE rounding, so near-duplicates
+         survive (178.11 next to 89.00; 199.89 next to 100.00).
+     So the three results are often one tempo plus its relatives. The
+     percentage is a share among the survivors, not accuracy (see 2).
+  e) FIRST-100 WEIGHTING (inherited from upstream): Run() replaces the
+     strength of only the FIRST 100 onsets by mean |sample| within +-100
+     frames; every later onset keeps strength 1.0 (set in FindOnsets). Mean
+     |sample| is normally well below 1, so early onsets weigh far less.
+     Present in both fetched ArrowVortex copies; a third-party standalone
+     port (nathanstep55/bpm-offset-detector) has the loop commented out.
+     [CODE] Effect TESTED on short synthetic tracks (few onsets, so the
+     down-weighted 100 are most of them): 90 s, 60 BPM gave NO results (the
+     editor would then say "No BPM could be detected for this music."); 90 s,
+     90 BPM gave 180 with the true 90 gone. With all strengths forced to 1.0
+     the same tracks gave 120/180/150 and 90/135. With 400 s tracks (400+
+     onsets) 60 -> 120 and 90 -> 90. Cause of the empty list not traced:
+     [INFERRED] fixed floors (0.001 in FillCoarseIntervals, 0.1 in
+     FillIntervalRange) against small fitness values. Probably small for
+     full-length songs, larger for short clips or quiet audio [INFERRED].
+     Observation, not a confirmed defect.
+ 
+5. Possible issues (observations, not confirmed defects)
+--------------------------------------------------------
+  a) Main-thread decode: the decode step blocks the editor before the
+     background thread starts; long files may freeze the UI briefly.
+     [INFERRED]
+  b) Constant-tempo assumption (section 3). [CODE]
+  c) 10-minute cap and 89-205 BPM search range (sections 4, 4b): out-of-range
+     tempos come back as 2x or 1/2; the duplicate filter can drop the true
+     tempo; the first 100 onsets are down-weighted. [CODE, TESTED synthetic]
+  d) Licensing: TempoDetector.cpp states it is derived from ArrowVortex
+     under GPL v3 or later, and aubio is GPL. The repository's LICENSE
+     file is also the GNU GPL v3 text (I read the first lines). I did not
+     check whether the rest of the project uses other licences, and this
+     is not legal advice. [CODE for the header text; the rest UNVERIFIED]
+ 
+6. Things I would check in-game
+-------------------------------
+  1. Adjust Sync row is missing in Practice edit mode and present in Full.
+  2. Run on a constant-BPM song with a known BPM/offset: compare the
+     three results with the true values; check which sign the offset has.
+  3. Run on a song with tempo changes: confirm Apply only changes beat 0
+     and offset (other BPM segments stay).
+  4. Run on a chart with its own timing (split timing): per the code the
+     result goes to whichever timing MODE is active (toggle key), see
+     Part 2 section 2. Also try Apply on a chart WITHOUT own timing while
+     in step-timing mode: expect the chart to gain a copy of the song
+     timing and the song timing to stay untouched.
+  5. Run on a very long file (>10 min): the analysis covers only the
+     first 10 minutes.
+  5b. Run on songs of known tempo below 89 (e.g. 70) and above 205, and on a
+     short (<60 s) clip: do the results match section 4b? Does a ~100 BPM
+     song show 100 and 200 together?
+  6. Time the freeze when pressing "Find BPM" on a long file (main-thread
+     decode).
+  7. Try Undo after applying a result.
+  8. Try leaving the editor while the analysis is running (should block
+     briefly, then exit).

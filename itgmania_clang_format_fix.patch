@@ -1,0 +1,14 @@
+diff --git a/src/UnlockManager.cpp b/src/UnlockManager.cpp
+index a53c160d96..218f79787d 100644
+--- a/src/UnlockManager.cpp
++++ b/src/UnlockManager.cpp
+@@ -165,7 +165,8 @@ int UnlockManager::SongIsLocked(const Song* pSong) const {
+ 
+   if (!pSong->m_bEnabled) {
+     iRet |= LOCKED_DISABLED;
+-  } else if (SONGMAN != nullptr && !SONGMAN->IsGroupEnabled(pSong->m_sGroupName)) {
++  } else if (
++      SONGMAN != nullptr && !SONGMAN->IsGroupEnabled(pSong->m_sGroupName)) {
+     iRet |= LOCKED_DISABLED;
+   }
+ 

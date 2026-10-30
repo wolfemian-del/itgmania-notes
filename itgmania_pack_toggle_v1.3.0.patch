@@ -1,0 +1,257 @@
+diff --git a/Docs/Luadoc/LuaDocumentation.xml b/Docs/Luadoc/LuaDocumentation.xml
+index 8b057e091e..2893e35272 100644
+--- a/Docs/Luadoc/LuaDocumentation.xml
++++ b/Docs/Luadoc/LuaDocumentation.xml
+@@ -3441,6 +3441,9 @@ end
+ 		Returns the sync offset to be applied to this group. Returns -0.0009 if <code>ITG</code> or 0 (0ms) if <code>NULL</code>
+ 		If this is not set in the <code>Pack.ini</code>, the <code>DefaultSyncOffset</code> preference is used instead.
+ 	</Function>
++	<Function name='IsEnabled' return='bool' arguments='' since='ITGmania 1.4.0'>
++		Returns <code>false</code> if the pack's folder name is listed in the <code>DisabledGroups</code> preference.
++	</Function>
+ 	<Function name='HasPackIni' return='bool' arguments='' since='ITGmania 1.0.0'>
+ 		Returns <code>true</code> if the group has a Pack.ini file, <code>false</code> otherwise.
+ 	</Function>
+@@ -5851,6 +5854,9 @@ local args = {
+ 	<Function name='IsEnabled' return='bool' arguments=''>
+ 		Returns <code>true</code> if the song is enabled.
+ 	</Function>
++	<Function name='SetEnabled' return='Song' arguments='bool bEnabled' since='ITGmania 1.4.0'>
++		Enables or disables the song in memory. Call <code>SONGMAN:SaveEnabledSongs()</code> to persist it in the <code>DisabledSongs</code> preference.
++	</Function>
+ 	<Function name='IsLong' return='bool' arguments=''>
+ 		Returns <code>true</code> if the song meets the criteria for a &quot;Long Version&quot;.
+ 	</Function>
+@@ -5964,6 +5970,15 @@ local args = {
+ 	<Function name='GetSongGroupBannerPath' return='string' arguments='string sGroup'>
+ 		Returns the path to the specified song group's banner.
+ 	</Function>
++	<Function name='SetGroupEnabled' return='SongManager' arguments='string sGroupName, bool bEnabled' since='ITGmania 1.4.0'>
++		Enables or disables a pack by folder name and saves the <code>DisabledGroups</code> preference. Disabled packs are hidden at once and are not loaded the next time songs are loaded; re-enabling a pack that was not loaded needs a song reload.
++	</Function>
++	<Function name='IsGroupEnabled' return='bool' arguments='string sGroupName' since='ITGmania 1.4.0'>
++		Returns <code>false</code> if the pack folder name is in <code>DisabledGroups</code> (case-insensitive).
++	</Function>
++	<Function name='SaveEnabledSongs' return='SongManager' arguments='' since='ITGmania 1.4.0'>
++		Writes the per-song enabled state to the <code>DisabledSongs</code> preference and saves preferences.
++	</Function>
+ 	<Function name='GetSeriesBannerPath' return='string' arguments='string sSeries'>
+ 		Returns the path to the specified series' banner.
+ 	</Function>
+diff --git a/src/Group.cpp b/src/Group.cpp
+index 6d61bf585a..9f47d47f7d 100644
+--- a/src/Group.cpp
++++ b/src/Group.cpp
+@@ -190,6 +190,12 @@ class LunaGroup : public Luna<Group> {
+     return 1;
+   }
+ 
++  static int IsEnabled(T* p, lua_State* L) {
++    lua_pushboolean(
++        L, SONGMAN == nullptr || SONGMAN->IsGroupEnabled(p->GetGroupName()));
++    return 1;
++  }
++
+   static int GetBannerPath(T* p, lua_State* L) {
+     lua_pushstring(L, p->GetBannerPath().c_str());
+     return 1;
+@@ -208,6 +214,7 @@ class LunaGroup : public Luna<Group> {
+     ADD_METHOD(GetSeries);
+     ADD_METHOD(GetSyncOffset);
+     ADD_METHOD(HasPackIni);
++    ADD_METHOD(IsEnabled);
+     ADD_METHOD(GetBannerPath);
+     ADD_METHOD(GetYearReleased);
+   }
+diff --git a/src/Song.cpp b/src/Song.cpp
+index 7f1df77a83..894cc7cf98 100644
+--- a/src/Song.cpp
++++ b/src/Song.cpp
+@@ -2165,6 +2165,10 @@ class LunaSong : public Luna<Song> {
+     lua_pushboolean(L, p->GetEnabled());
+     return 1;
+   }
++  static int SetEnabled(T* p, lua_State* L) {
++    p->SetEnabled(BArg(1));
++    COMMON_RETURN_SELF;
++  }
+   static int IsCustomSong(T* p, lua_State* L) {
+     lua_pushboolean(L, p->m_LoadedFromProfile != ProfileSlot_Invalid);
+     return 1;
+@@ -2399,6 +2403,7 @@ class LunaSong : public Luna<Song> {
+     ADD_METHOD(GetSongFilePath);
+     ADD_METHOD(IsTutorial);
+     ADD_METHOD(IsEnabled);
++    ADD_METHOD(SetEnabled);
+     ADD_METHOD(IsCustomSong);
+     ADD_METHOD(GetGroupName);
+     ADD_METHOD(MusicLengthSeconds);
+diff --git a/src/SongManager.cpp b/src/SongManager.cpp
+index c81e7a7d0e..4606f97e80 100644
+--- a/src/SongManager.cpp
++++ b/src/SongManager.cpp
+@@ -87,6 +87,14 @@ static const ThemeMetric<int> EXTRA_STAGE2_DIFFICULTY_MAX(
+     "SongManager", "ExtraStage2DifficultyMax");
+ 
+ static Preference<std::string> g_sDisabledSongs("DisabledSongs", "");
++static Preference<std::string> g_sDisabledGroups("DisabledGroups", "");
++
++static std::string LowerGroupName(std::string s) {
++  if (!s.empty()) {
++    MakeLower(&s[0], s.size());
++  }
++  return s;
++}
+ static Preference<bool> g_bHideIncompleteCourses(
+     "HideIncompleteCourses", false);
+ 
+@@ -277,6 +285,7 @@ void SongManager::InitSongsFromDisk(LoadingWindow* ld, bool onlyAdditions) {
+   // an entry. -Kyz
+   SONGINDEX->delay_save_cache = true;
+   IMAGECACHE->delay_save_cache = true;
++  LoadDisabledGroupsFromPref();
+   LoadSongDir(SpecialFiles::SONGS_DIR, ld, onlyAdditions);
+   LoadEnabledSongsFromPref();
+   SONGINDEX->SaveCacheIndex();
+@@ -462,6 +471,14 @@ void SongManager::LoadSongDir(
+           ssprintf("\n%s", Basename(sGroupDirName).c_str()));
+     }
+ 
++    // Packs listed in the DisabledGroups preference are not loaded at all.
++    if (!IsGroupEnabled(sGroupDirName)) {
++      LOG->Trace(
++          "Skipping disabled pack \"%s\" (DisabledGroups)",
++          sGroupDirName.c_str());
++      continue;
++    }
++
+     if (SanityCheckGroupDir(sDir + sGroupDirName)) {
+       // Find all Song folders in this group directory
+       std::vector<std::string> arraySongDirs;
+@@ -1575,6 +1592,50 @@ void SongManager::LoadEnabledSongsFromPref() {
+   }
+ }
+ 
++void SongManager::LoadDisabledGroupsFromPref() {
++  m_mapDisabledGroups.clear();
++  std::vector<std::string> asDisabled;
++  split(g_sDisabledGroups, ";", asDisabled, true);
++  for (std::string& s : asDisabled) {
++    Trim(s);
++    if (s.empty()) {
++      continue;
++    }
++    m_mapDisabledGroups[LowerGroupName(s)] = s;
++  }
++}
++
++void SongManager::SaveDisabledGroupsToPref() {
++  std::vector<std::string> vs;
++  for (const auto& kv : m_mapDisabledGroups) {
++    vs.push_back(kv.second);
++  }
++  g_sDisabledGroups.Set(join(";", vs));
++}
++
++bool SongManager::IsGroupEnabled(const std::string& sGroupName) const {
++  if (m_mapDisabledGroups.empty()) {
++    return true;
++  }
++  return m_mapDisabledGroups.find(LowerGroupName(sGroupName)) ==
++         m_mapDisabledGroups.end();
++}
++
++void SongManager::SetGroupEnabled(
++    const std::string& sGroupName, bool bEnabled) {
++  std::string sKey = LowerGroupName(sGroupName);
++  if (sKey.empty()) {
++    return;
++  }
++  if (bEnabled) {
++    m_mapDisabledGroups.erase(sKey);
++  } else {
++    m_mapDisabledGroups[sKey] = sGroupName;
++  }
++  SaveDisabledGroupsToPref();
++  PREFSMAN->SavePrefsToDisk();
++}
++
+ void SongManager::GetStepsLoadedFromProfile(
+     std::vector<Steps*>& AddTo, ProfileSlot slot) const {
+   const std::vector<Song*>& vSongs = GetAllSongs();
+@@ -2761,6 +2822,20 @@ class LunaSongManager : public Luna<SongManager> {
+   DEFINE_METHOD(DoesSongGroupExist, DoesSongGroupExist(SArg(1)));
+   DEFINE_METHOD(DoesCourseGroupExist, DoesCourseGroupExist(SArg(1)));
+ 
++  static int SetGroupEnabled(T* p, lua_State* L) {
++    p->SetGroupEnabled(SArg(1), BArg(2));
++    COMMON_RETURN_SELF;
++  }
++  static int IsGroupEnabled(T* p, lua_State* L) {
++    lua_pushboolean(L, p->IsGroupEnabled(SArg(1)));
++    return 1;
++  }
++  static int SaveEnabledSongs(T* p, lua_State* L) {
++    p->SaveEnabledSongsToPref();
++    PREFSMAN->SavePrefsToDisk();
++    COMMON_RETURN_SELF;
++  }
++
+   static int GetPopularSongs(T* p, lua_State* L) {
+     const std::vector<Song*>& v = p->GetPopularSongs();
+     LuaHelpers::CreateTableFromArray<Song*>(v, L);
+@@ -2829,6 +2904,9 @@ class LunaSongManager : public Luna<SongManager> {
+     ADD_METHOD(GetPreferredSortCourses);
+     ADD_METHOD(GetSongGroupBannerPath);
+     ADD_METHOD(GetSeriesBannerPath);
++    ADD_METHOD(SetGroupEnabled);
++    ADD_METHOD(IsGroupEnabled);
++    ADD_METHOD(SaveEnabledSongs);
+     ADD_METHOD(GetCourseGroupBannerPath);
+     ADD_METHOD(DoesSongGroupExist);
+     ADD_METHOD(DoesCourseGroupExist);
+diff --git a/src/SongManager.h b/src/SongManager.h
+index 00431a262d..395d1731c1 100644
+--- a/src/SongManager.h
++++ b/src/SongManager.h
+@@ -61,6 +61,18 @@ class SongManager {
+   void SaveEnabledSongsToPref();
+   void LoadEnabledSongsFromPref();
+ 
++  // Pack-level enable/disable (preference "DisabledGroups": pack folder
++  // names separated by ";", matched case-insensitively).
++  void LoadDisabledGroupsFromPref();
++  void SaveDisabledGroupsToPref();
++  bool IsGroupEnabled(const std::string& sGroupName) const;
++  // Updates the in-memory set, writes the preference and saves prefs to disk.
++  void SetGroupEnabled(const std::string& sGroupName, bool bEnabled);
++  // True if the pack folder name is in DisabledGroups (used to skip loading).
++  bool IsGroupDisabledByName(const std::string& sGroupName) const {
++    return !IsGroupEnabled(sGroupName);
++  }
++
+   void LoadStepEditsFromProfileDir(
+       const std::string& sProfileDir, ProfileSlot slot);
+   void LoadCourseEditsFromProfileDir(
+@@ -300,6 +312,8 @@ class SongManager {
+                          // object
+   // maps a series name to Series object
+   std::map<std::string, Series> m_mapNameToSeries;
++  /** @brief Disabled pack folder names: lower-cased -> as written. */
++  std::map<std::string, std::string> m_mapDisabledGroups;
+ 
+   struct Comp {
+     bool operator()(const std::string& s, const std::string& t) const {
+diff --git a/src/UnlockManager.cpp b/src/UnlockManager.cpp
+index 3b96222b48..a53c160d96 100644
+--- a/src/UnlockManager.cpp
++++ b/src/UnlockManager.cpp
+@@ -165,6 +165,8 @@ int UnlockManager::SongIsLocked(const Song* pSong) const {
+ 
+   if (!pSong->m_bEnabled) {
+     iRet |= LOCKED_DISABLED;
++  } else if (SONGMAN != nullptr && !SONGMAN->IsGroupEnabled(pSong->m_sGroupName)) {
++    iRet |= LOCKED_DISABLED;
+   }
+ 
+   return iRet;

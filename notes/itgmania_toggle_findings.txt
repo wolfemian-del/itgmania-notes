@@ -1,0 +1,330 @@
+ITGMANIA PACK / SONG TOGGLE, SL SEARCH SHORTCUT, TEST ROUNDS AND RELOAD-PROFILE FINDING
+=======================================================================================
+REVISION: 2026-10-12-a | file: itgmania_toggle_findings.txt | bytes: 22051
+Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
+sections are copied with their IDs unchanged (7f, 7g, 7h, 7k, 7l, 7m, 7n, 7v,
+7w). No new code findings. Design and patch detail: itgmania_pack_toggle_sketch.txt.
+
+FILE STATUS (map of all files: /INDEX.md)
+  STATUS:        ACTIVE. Toggle patches built and field-tested; open tests are
+                 sketch Part I3 items 12-36; Reload-Songs profile finding PARKED
+                 (7v item 4, no patch written).
+  VERSION BASIS: v1.3.0 8a3bf8884a and Simply Love dd06138; patches also apply
+                 cleanly to beta c8e69b9ca8 (git apply --check, not compiled).
+  TOPIC KEY:     DisabledGroups, DisabledSongs, toggle songs, SongIsLocked,
+                 pack skip, SL operator menu, song search shortcut, Ctrl+F,
+                 wheel timing, LogWheelTimings, Reload Songs, default profile,
+                 DefaultLocalProfileID, INI duplicate keys
+  READ WHEN:     the task touches the pack/song toggle patches or their tests,
+                 hiding vs skipping packs, the F-key search shortcut, wheel
+                 timing numbers, or why Reload Songs clears the P1 profile.
+  SEE ALSO:      itgmania_pack_toggle_sketch.txt (Parts A-I; I3 = open tests,
+                 I4 = timings); engine notes v3 (6 items 11-13, 8 items 12-14);
+                 itgmania_load_memory_findings.txt (7p: extra folders).
+Tags: [CODE] read in source, [INFERRED] reasoned, not run, [UNVERIFIED] not
+determined, [TESTED] user-run.
+
+
+7f. PACK / SONG TOGGLE IDEA (2026-09-30, v1.3.0 8a3bf8884a)
+  [CODE unless noted; TESTED = user-run.] Design and patch details live in
+  itgmania_pack_toggle_sketch.txt (Parts A-H); this entry keeps the facts
+  found while framing the idea.
+  Idea (user): let players toggle packs and/or songs so they truly do not
+  appear (manageable menus, large libraries, performance).
+  Underscore myth: a leading "_" does NOT hide a pack [CODE: only
+  StripMacResourceForks (names starting "._") and StripCvsAndSvn (names ending
+  CVS, .svn, .hg) filter folders in LoadSongDir]. TESTED: "_Pack" loads
+  normally (sorts last, SongUtil::MakeSortString); "._Pack" disappears, only
+  as a side effect of the macOS filter; it drops the folder before any song
+  loading, so it should save load time [INFERRED; library too small to
+  measure].
+  Crash/empty-data worry: not found in ITGmania. No persistent pack database;
+  the cache is keyed by path (SongCacheIndex.cpp header comment), so a renamed
+  folder is a new path. Pruning of orphaned cache files not found
+  [UNVERIFIED]. Worry probably from StepMania 5 / Project Outfox; dropped.
+  Existing per-song disable:
+    - Song::m_bEnabled -> UnlockManager::SongIsLocked returns LOCKED_DISABLED
+      -> MusicWheel drops it in BuildWheelItemDatas (~505) and
+      FilterWheelItemDatas (~1341). Persisted in pref "DisabledSongs"
+      (g_sDisabledSongs; SaveEnabledSongsToPref / LoadEnabledSongsFromPref).
+      TESTED: a DisabledSongs entry hides the song.
+    - SYNTAX [CODE: SongManager.cpp split/join on ";"; SongUtil.cpp SongID;
+      GetSongFromDir]: ONE preference line, entries separated by ";", each the
+      song folder path, e.g.
+        DisabledSongs=Songs/PackA/SongOne/;Songs/PackA/SongTwo/
+      Matching is lenient: case-insensitive, "\" = "/", trailing and leading
+      "/" optional; entries matching no loaded song are ignored; a folder name
+      containing ";" cannot be listed. Edit Preferences.ini with the game
+      CLOSED (it is rewritten on exit). SaveEnabledSongsToPref rewrites the
+      value from loaded songs (drops unloaded ones) and is called only from
+      the toggle screen.
+    - REPEATED KEYS: TESTED 2026-09-30: with several DisabledSongs lines only
+      the FIRST took effect and the others were deleted. The code says the
+      LAST should win (7l). UNRESOLVED; use the single-line form.
+    - UI: ScreenOptionsToggleSongs (groups) and ...SubPage (songs, On/Off)
+      exist in src and save on each change, but nothing reaches them: no
+      reference in _fallback or Simply Love dd06138, and they cannot be opened
+      as-is because ScreenManager::MakeNewScreen needs a [<Screen>] Class
+      metric (sketch A9). Only doc mention: Changelog_sm-ssc.txt ~198-201.
+    - Lua: Song:IsEnabled() only (no SetEnabled at v1.3.0). No pack-level
+      disable. #SELECTABLE:NO hides a song only with pref HiddenSongs on.
+  Limits [INFERRED from call order]: LoadEnabledSongsFromPref runs in
+    InitSongsFromDisk AFTER LoadSongDir (~280), so disabled songs are still
+    parsed/cache-loaded and keep resident chart, timing and banner-cache
+    data: hides rows only, no startup or memory saving. TESTED: listing every
+    song of one pack in one DisabledSongs line hides the whole pack row.
+  Options evaluated: A engine (hide via DisabledGroups + skip in LoadSongDir;
+    best = both; reload via Reload(false) = FreeSongs + full InitAll, see
+    sketch A1), B Simply Love only (needs engine Lua setters), C standalone
+    tool editing DisabledSongs or renaming to "._" (no live toggle, cache
+    invalidated). Recommendation: A, with B as the UI layer.
+
+7g. PACK TOGGLE PATCH (2026-09-30) - sketch Part F
+  itgmania_pack_toggle_v1_3_0.patch against v1.3.0 (6 files, +121): pref
+  DisabledGroups (";"-separated pack folder names, case-insensitive), live
+  hide via SongIsLocked, skip in LoadSongDir, Lua SONGMAN:SetGroupEnabled/
+  IsGroupEnabled/SaveEnabledSongs, Group:IsEnabled, Song:SetEnabled
+  (documented "since ITGmania 1.4.0"). g++ -fsyntax-only OK on 4 files.
+  CORRECTION 2026-10-01: Reload(false) turns FastLoad off, which only adds a
+  cache-validity check (directory hash of per-file mtime+size); valid cache
+  files are still used (sketch A1). Time "Reload Songs" in game [UNVERIFIED].
+
+7h. PACK TOGGLE UI PATCH (2026-10-01) - sketch Part G
+  itgmania_pack_toggle_ui_v1_3_0.patch (apply after the first) +
+  sl_toggle_songs.patch (Simply Love text edits; manual version:
+  sl_toggle_songs_manual_edits.txt). Syntax-checked only at writing; built and
+  field-tested later (7n). User plan: GitHub fork build (Windows 11):
+  fork, enable Actions, git apply both engine patches, push to the fork's
+  `release` branch, download the Windows installer artifact (ClubFantastic
+  Off); SL edits go in the installed theme folder.
+
+7k. CODE-CHECK ROUND (2026-10-01) [CODE; details in the files named]
+  - BETA HEAD MOVED 28e58a78c7 -> c8e69b9ca8; 5 new commits (read in 7t).
+  - Simply Love vs the "show one in row" arrow item: no collision (SL's
+    index-based reads of option-row text items are only on ScreenPlayerOptions
+    rows Mini/SpeedMod/NoteSkinVariant, which uses "normal" navigation).
+  - Pad sensor: Lua player keys "P1"/"P2"; no lock on the sensor table; snek
+    poll loop on failure is tight (re-enumeration + two warnings per pass);
+    HidDevice::GetDeviceInfo leaks the enumerate list (v1.3.0 too).
+  - Pack toggle (sketch Part H): reader audit done; both engine patches and
+    the SL patch apply cleanly to beta c8e69b9ca8 / SL dd06138 (git apply
+    --check; NOT compiled on beta). Findings: Branches.lua uses
+    SONGMAN:GetNumSongs()==0 -> ScreenHowToInstallSongs and hide-only does not
+    change that count; EditMode_Full ignores the disabled flag; bookkeeping
+    deliberately still counts disabled songs.
+
+7l. CODE-CHECK ROUND 2 (2026-10-02) [CODE]
+  - ADJUST SYNC TARGET TIMING (ScreenEdit.cpp ~5626-5642): decided by
+    GAMESTATE->m_bIsUsingStepTiming (editor timing mode), not by whether the
+    chart has own timing. Mode true + chart has no own timing -> song timing is
+    COPIED into the chart and the result applied there (chart becomes
+    split-timing; song timing unchanged). Mode false -> song timing. The mode
+    starts true only if the chart already has own timing; reset to true on
+    leaving the editor (editor notes Part 2 s.2).
+  - INI DUPLICATE KEYS (IniFile.cpp ReadFile ~34-112, XmlFile.cpp AppendAttr
+    ~196-204, XmlFile.h XAttrs = std::map, PrefsManager.cpp ReadPrefsFromFile
+    ~462): a repeated key within one section overwrites the earlier value, so
+    the LAST line wins; key names case-sensitive; repeated section names merge;
+    lines starting ';', '#', '//' or '--' are comments; a line without '='
+    only logs a warning.
+    DISCREPANCY with the user's test (first line won): possible reasons
+    [INFERRED, none confirmed]: lines not in the remembered order; a
+    different file or section held one (Preferences.ini [Options] is read after
+    Defaults.ini, before Static.ini); Static.ini or Defaults.ini also sets it.
+    NEEDS USER RETEST: game closed, put DisabledSongs=<songA> then
+    DisabledSongs=<songB> in [Options], start, note which is hidden.
+  - SKIPPED PACKS AND SAVED STATE: SongID::ToSong returns null for unloaded
+    songs (GetSongFromDir = lookup in m_SongsByDir); MusicWheel::SelectSong
+    returns false for null or for a song not on the wheel, so selection falls
+    to the current song, courses, then the first selectable item; profile
+    m_lastSong is not overwritten until another song is chosen (GameState.cpp
+    ~941); Profile:GetLastPlayedSong() returns nil (themes must handle it);
+    fixed #SONG course entries into a skipped pack are dropped with a log
+    message and the course is marked incomplete (shown unless
+    HideIncompleteCourses, default false). Edge: SORT_PREFERRED/SORT_METER with
+    a remembered open section can return true from SelectSong without
+    selecting the song (observation, not run). Hide-only vs fixed-song
+    courses: not read [UNVERIFIED].
+  - Not done that round: the other A-list items (now tracked in engine notes
+    v3 section 6).
+
+
+7m. SL SONG-SEARCH KEYBOARD SHORTCUT (2026-10-02) - sl_song_search_shortcut.patch
+  Question: add a keyboard shortcut (user suggested Ctrl+F) on Simply Love's
+  song select for the song search, otherwise reached via SortMenu >
+  "WhereforeArtThou". Bases: engine v1.3.0 and beta (ScreenSelectMusic.cpp
+  diff = DetectCodes only), Simply Love dd06138. Not run by me. [CODE unless
+  noted]
+  - CTRL+LETTER IS TAKEN BY THE ENGINE (ScreenSelectMusic.cpp ~494-540):
+    Ctrl+A..Z jumps to that letter, sets sort to Title (Artist stays Artist),
+    writes m_PreferredSortOrder, then ChangeSort/SetOpenSection/SelectSection.
+    Ctrl+Shift+R reloads the selected song (checked first); Ctrl+Backspace
+    deletes a song when AllowSongDeletion.
+  - ORDER: ScreenManager::Input (~562-565) calls the top screen's Input, THEN
+    PassInputToLua, regardless of the return value, so a Lua callback cannot
+    pre-empt the engine handler. set_input_redirected is per PlayerNumber and
+    PlayerNumber is filled only for keys mapped to a game button
+    (StepMania.cpp ~1360), so it cannot suppress the engine for an unmapped
+    key [INFERRED: an unmapped key arrives with nil PlayerNumber; SL's own
+    handlers rely on it].
+  - TESTED by user: Ctrl+F and Ctrl+Shift+F both jump to F and switch to
+    Title; the Title sort persists after visiting the song-select settings
+    menu; Alt+F and plain F do nothing.
+  - PLAIN F IS FREE: no engine file except input drivers and the key enum
+    references KEY_Cf; GameManager.cpp keyboard auto-maps use q,w,e,r,t,y,u,i,
+    a,d,s,x,z,c; debug overlay letters stop at Q-P, A, S, D; SL has no
+    DeviceButton_f binding. A player can still map F in the key mapping screen.
+  - HOW THE PATCH WORKS (3 files: new SongSearch/ShortcutHandler.lua, one
+    LoadActor line in ScreenSelectMusic overlay/default.lua, en.ini text for
+    KeyboardFeatures): an input callback added in OnCommand only if theme pref
+    KeyboardFeatures is on. On FirstPress of DeviceButton_f it queues SortMenu's
+    existing DirectInputToEngineForSongSearch command. Guards: no modifier held
+    (tracked from events; no Lua key-state API); event PlayerNumber nil; no
+    player input redirected (every overlay redirects); top screen is
+    ScreenSelectMusic; not transitioning; not course mode; wheel not locked.
+    Calls wheel:Move(0) first (the key release goes to the text entry)
+    [INFERRED]. Checked here: Lua syntax, a mock-based logic test in embedded
+    Lua 5.4, git apply --check on a fresh dd06138. NOT run in the game.
+  - Typing "f" in the box does not re-trigger (only ScreenTextEntry gets input;
+    it types on FirstPress, so the opening F is not typed) [INFERRED].
+  - LIMITS [INFERRED]: modifier state comes from events this callback saw; a
+    stale flag ignores F until that modifier is pressed and released once.
+    Ctrl held before load plus F would run the engine jump and the search.
+    Key identified by position code; non-US layouts UNVERIFIED. Only
+    ScreenSelectMusic (the Casual screen is not touched).
+  - OBSERVATION: SortMenu/default.lua loads SongSearch/SongSearchSettings.lua
+    (line 16) then defines a second local SongSearchSettings (~line 60) that
+    shadows it, so edits to the file would not change the sort-menu search.
+  - Engine alternatives not done: (a) opt-out of Ctrl+letter jump (needs an
+    engine change; SL pins an engine commit); (b) Lua undoing the jump.
+  - USER CHECKS (KeyboardFeatures on): F on song select opens the box and
+    stops a held wheel direction; type, OK: results; Back: closes. F with sort
+    menu / results / test input open: nothing. Ctrl+F still jumps, no box.
+    Course mode: nothing. Pref off: nothing. F again works after closing. F
+    mapped to a pad button: no search.
+
+7n. USER TEST OF TOGGLE UI + WHEEL TIMING + CLANG FIX (2026-10-02, user-reported)
+  Build: GitHub Actions fork build with itgmania_pack_toggle_ui_v1_3_0.patch,
+  wheel-timing-log.patch and itgmania_clang_format_fix.patch added to the
+  earlier toggle patch. No compile errors (the earlier clang-format failure is
+  gone); the exe runs. Packs switch On/Off in the in-game GUI; the change shows
+  on the next entry to song select, as predicted (sketch Part G). [TESTED]
+  Not reported: sl_toggle_songs.patch / operator-menu entry (unclear which
+  theme's screen was used); sl_song_search_shortcut.patch (not included).
+  WheelTiming log (LogWheelTimings=1), same library, a few scrolls/re-sorts
+  [TESTED; one session per state]:
+    state            songs groups  Series build   Series filter  Title build/filter
+    all packs on     3484   90     75.7, 51.3 ms  7.1, 5.7 ms    22.3 / 5.6 ms
+    large packs off  1808   75     61.8, 25.7,    2.9, 3.0,      not logged
+                                   28.0 ms        3.1 ms
+    Wheel Load (UpdatePopular + SortSongs): all on 29.3 + 24.8 ms first, 13.2 +
+    8.1 ms second; off 10.8 + 7.5, 7.1 + 3.6, 7.0 + 4.1 ms. Unfiltered Series
+    items 3576 vs 1885 (songs + section rows).
+  Reading [INFERRED from these numbers only]:
+    - Work scales roughly with song count: songs -48%, steady-state Series
+      build -50% (51 -> 26-28 ms), filter -45%. Matches 4a.
+    - The first build after launch is slower in both runs (75.7 vs 51.3 ms;
+      61.8 vs 25.7 ms), likely cold caches [UNVERIFIED]; compare steady state.
+    - Absolute cost is small (30-80 ms per Series build, a few ms to filter),
+      consistent with >120 FPS either way; the saving is at screen entry, not
+      per frame (per-frame wheel cost was not logged).
+    - n=1 per state; differences of a few ms are not meaningful.
+  Consequence: skip-at-load and hide-only both work in the field; a smaller
+  library saves real but modest wheel time on a fast PC.
+
+
+7v. TEST ROUND OF TOGGLE UI / SL PATCHES / SEARCH SHORTCUT AND THE RELOAD-PROFILE FINDING (2026-10-06/07)
+  [TESTED] = user-run; code tags as elsewhere; I did not run the game. Code read
+  on v1.3.0 8a3bf8884a and Simply Love dd06138; beta head seen now is 7b34bfe2ac
+  (it moved from e4b4bf0755; the new commits are NOT reviewed).
+  State: all patches merged in the user's ITGmania and Simply Love forks; latest
+  build installed.
+  1. Results of the first 11 questions: see sketch Part I1 (all as predicted;
+     the SL operator-menu entry works; Start on a freshly Off but still loaded
+     pack opens the song page, a skipped pack gives the invalid sound after a
+     restart; skip log line present; both reload paths restore a pack; scores
+     intact in Stats.xml). Usability note: ~90 packs is tedious without
+     search/jump.
+  2. Search shortcut: F opens the search; search works as via the menu [TESTED].
+     Remaining 7m checks are open (Part I3, 27-36).
+  3. TERMS: "full reload" in my replies = service-menu "Reload Songs"
+     ([ScreenReloadSongs] OnlyLoadAdditions=false -> SONGMAN->Reload(false)).
+     SL's sort-menu "Load New Songs" = ScreenReloadSongsSSM, OnlyLoadAdditions=
+     true -> LoadAdditions (no unjoin, songs are only added). Neither is an
+     application restart.
+  4. FINDING: service-menu Reload Songs clears the saved default profile of
+     joined players [TESTED effect; mechanism CODE v1.3.0, INFERRED combination].
+     Not caused by the toggle patches (they do not touch Reload or profiles).
+     Chain:
+     a) Service-menu screens force-join all players: _fallback
+        [ScreenOptionsSimple] ForceAllPlayers=true (metrics.ini ~2749) and
+        ScreenOptionsMaster::Init joins every player when it is set (~44).
+        Simply Love's [ScreenOptionsService] falls back to ScreenOptionsSimple
+        and I found no ForceAllPlayers override in SL metrics.ini.
+     b) ScreenTitleMenu's constructor calls GAMESTATE->Reset() (~33), which
+        unjoins everyone and unloads profiles, so players forced into the
+        service menu have NO profile loaded.
+     c) SongManager::Reload (SongManager.cpp ~175-255): for each joined player
+        with no persistent profile and no memory card it queues
+        (pn, "", false) (third branch), then unjoins and unloads.
+     d) After InitAll it rejoins and, for non-card entries, runs
+        PROFILEMAN->m_sDefaultLocalProfileID[pn].Set(profileID) (~248). With an
+        empty profileID this CLEARS the saved default profile, then
+        LoadLocalProfileFromMachine finds nothing.
+     e) Preferences.ini still showed DefaultLocalProfileIDP1=testing while the
+        game ran (file not rewritten) and lost it at close, so the in-memory
+        value was cleared. [TESTED]
+     f) Load New Songs never calls Reload(), so it does not touch the profile
+        [TESTED by user; CODE].
+     Tests [TESTED]: Manage Local Profiles showed "testing" as P1 before
+     Reload Songs and not after; the Preferences.ini entry disappeared at game
+     close; re-selecting "testing" as P1 in Manage Local Profiles afterwards
+     held persistently. After Reload Songs the game goes to the TITLE screen,
+     not back to the service menu: [ScreenReloadSongs] NextScreen=
+     Branch.TitleMenu() (_fallback metrics.ini ~3288; no SL override found).
+     Simply Love's main flow shows no profile select; it plays as guest unless
+     a default profile is saved (user observation; SL's ScreenSelectProfile was
+     not read).
+     Beta: git diff --stat v1.3.0..7b34bfe2ac shows SongManager.cpp +11 lines
+     (series notes 12h: only GetGroupsInSeries) and GameState.cpp +7 -
+     (unrelated), so Reload() reads the same on beta [CODE by diff size; the
+     SongManager hunks were not re-read today].
+     Reading: looks like an upstream defect (the guest path wipes a saved
+     default). Observation, not a confirmed defect; intent unknown.
+     FIX IDEA, NOT WRITTEN OR TESTED (parked at the user's request 2026-10-07):
+     in Reload(), skip the m_sDefaultLocalProfileID Set when profileID is empty
+     (or queue only players that had a persistent profile). Outside the toggle
+     patches; would be a separate small patch.
+  5. Related code facts [CODE v1.3.0]:
+     - The operator key is GAME_BUTTON_OPERATOR; default keyboard mapping
+       KEY_SCRLLOCK (InputMapper.cpp:80). HandleGlobalInputs (StepMania.cpp
+       ~1128): if AllowOperatorMenuButton, PopAllScreens, GAMESTATE->Reset(),
+       SetNewScreen(OperatorMenuScreen). [ScreenOptionsService]
+       AllowOperatorMenuButton=false. User mapping/SL defaults not checked.
+     - Manage Local Profiles marks P1/P2 from the saved pref
+       m_sDefaultLocalProfileID (ScreenOptionsManageProfiles.cpp ~173), not from
+       what is loaded. GameState::LoadProfiles (~597) loads from that pref when a
+       player joins; GameState::Reset keeps the pref. So "still marked P1" does
+       not show a profile stayed loaded.
+     - Other writers of the pref: GameCommand.cpp ~839, ScreenSelectProfile.cpp
+       ~219, ScreenOptionsManageProfiles.cpp ~257/~324, SongManager.cpp ~248;
+       DeleteLocalProfile clears matching entries (ProfileManager.cpp ~904).
+  6. Open tests: sketch Part I3 (items 12-36).
+
+
+7w. WHEEL TIMING ON A 5406-SONG LIBRARY (2026-10-07, user-reported) - sketch Part I4
+  [TESTED = user-run log excerpts; reading INFERRED.] Build: same fork as 7n.
+  - LogWheelTimings=0 writes no WheelTiming lines (item 24 done).
+  - 5406 songs / 168 groups vs 3211 songs / 146 groups (~2200 songs skipped via
+    DisabledGroups): per-sort build and filter times drop 37-48 percent, about
+    in line with 41 percent fewer songs. Filter ~1.5 us/item; Series build
+    70.1 -> 38.4 ms, Group 77.4 -> 42.4, Meter build+filter 83 -> 45 ms; wheel
+    Load 57 -> 31 ms (first) and 19 ms (second). Table in sketch I4.
+  - Skipped-run repeat (after leaving to title) agrees within 1-2 ms. A sort is
+    logged once per visit to song select (valid sorts return before the timing
+    code; Load resets statuses), which explains one set in the all-on run
+    (no title round trip) and two in the skipped run.
+  - The earlier cold-start gap (7n) was not reproduced at this size.
+  - Measured state is skip-at-load; hide-only timing and per-frame cost not
+    measured. Effect is a few frames' hitch at screen entry and first use of
+    each sort, not a frame-rate change.
