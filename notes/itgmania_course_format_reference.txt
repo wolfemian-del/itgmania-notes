@@ -1,5 +1,5 @@
 ITGMANIA COURSE (.crs) FORMAT - REFERENCE FROM SOURCE (supported / unsupported behaviour)
-REVISION: 2026-10-31-a | file: notes/itgmania_course_format_reference.txt | prefix: cref
+REVISION: 2026-10-31-b | file: notes/itgmania_course_format_reference.txt | prefix: cref
 
 FILE STATUS
   Status:     ACTIVE; OPEN-CHECKS. Read-only code analysis plus one synthetic parser test. In-game checks (section 16) 2026-10-30:
@@ -399,6 +399,18 @@ FILE STATUS
 16. IN-GAME CHECKS (partly run 2026-10-30, results per item) - implemented by tools/course/make_cref_test_pack.py (12 .crs + CHECKLIST.txt;
     M10 is split into M10a/M10b). Add to the checks: M12 (R1) a course with "#MODS:TIME=0:LEN=9999:MODS=no jumps;" before
     a #SONG, to confirm the form the Reddit thread could not find; not yet in the generator.
+  STATUS OF THE CHECKS (2026-10-31; details under each item below)
+    RESOLVED [OBSERVED]: M1 (timed "=" #MODS works), M2 (docs colon form does nothing, no log), M6 + M6b (cache drops
+      GENRE/DURATION/BPMRANGE and the cached course re-rolls a random song each restart), M7 (#MODS bad token: log + dialog
+      at load; #SONG bad token: logged only when applied), M8 ("battery" entry mod does not change the life bar),
+      M10 (#METER:Medium invalid, Regular shows 8).
+    PARTLY RESOLVED: M3 (log proves the transform ran over beats 6-49; whether it changed visible notes is unknown),
+      M5 (log proves the missing entry is ignored; the carry-over of its timed mod to the next song is not yet seen),
+      M9 (song 2 "metal" did not apply; song 1 "cel" not reported; cause untraced).
+    LIVE, NOT RUN: M3b, M3c ("big" visibility; also the start-late behaviour), M4 (time base on song 2), M11 (#STYLE).
+    NOT IN THE GENERATOR YET: M12 (Reddit form "#MODS:TIME=0:LEN=9999:MODS=no jumps;" before a #SONG).
+    Not to be run on a build you care about: 8.3c. Everything else in sections 1-15 without an [OBSERVED] tag is still
+    code reading only.
   M1  Two-song course; song 1 mods "#MODS:TIME=10:LEN=10:MODS=reverse;" -> reverse for seconds 10-20. Predicted: works.
   M2  Same with CourseFormat.txt format 1. Predicted: nothing, no log.
   RESULT M1/M2 2026-10-30 [OBSERVED]: M1 PASS (arrows reverse, then reverse back, in song 1); M2 PASS (no change). Exact
