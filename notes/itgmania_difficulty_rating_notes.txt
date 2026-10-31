@@ -1,6 +1,6 @@
 ITGMANIA: DERIVED DIFFICULTY RATING - HOOK POINTS IN RADAR / TECH-COUNT CODE (v1.3.0)
 =====================================================================================
-REVISION: 2026-10-11-a | file: itgmania_difficulty_rating_notes.txt | companion: itgmania_difficulty_rating_writeup.txt
+REVISION: 2026-10-30-b | file: notes/itgmania_difficulty_rating_notes.txt | companion: itgmania_difficulty_rating_writeup.txt
 Basis:    itgmania/itgmania tag v1.3.0 (8a3bf8884a), src/ read 2026-10-09.
           Not built, not run. Beta not diffed for these files (beta head seen
           7b34bfe2ac) [UNVERIFIED that they are unchanged].
@@ -564,8 +564,8 @@ only, not in these notes [INFERRED].
     new model's advantages are about +8 points within-1, lower error at 14+,
     and working at levels 17-19.
   * DEPLOYED MODEL FILES (user's real outputs, saved to project knowledge
-    2026-10-11): claude/difficulty_model_notech.json (the model.json) and
-    claude/DifficultyModel.lua (generated from it). Fit options recorded in
+    2026-10-11): tools/difficulty/difficulty_model_notech.json (the model.json) and
+    tools/difficulty/DifficultyModel.lua (generated from it). Fit options recorded in
     the json [OBSERVED]: version 2, dance-single, ridge alpha 3, top label
     censored at 19, group_by song, tech_features false, excluded packs
     "DDR II (Wii)" and "DDR X (PS2, JP)" (GRAND PRIX included, dedupe on),
@@ -574,8 +574,8 @@ only, not in these notes [INFERRED].
     within-1 94.3%, rho 0.9847; calibration slope 0.9958; 47 knots. To
     regenerate the Lua: python make_lua_rating.py difficulty_model_notech.json
     DifficultyModel.lua.
-  * DEPLOYED MODEL FILES (2026-10-11): claude/DifficultyModel.lua and
-    claude/difficulty_model_notech.json in project knowledge (uploaded by the
+  * DEPLOYED MODEL FILES (2026-10-11): tools/difficulty/DifficultyModel.lua and
+    tools/difficulty/difficulty_model_notech.json in project knowledge (uploaded by the
     user from fit_notech). Fit options recorded in the JSON: ridge alpha 3,
     --no-tech, --censor-top 19, --group-by song, excluded packs "DDR II
     (Wii)" and "DDR X (PS2, JP)", 5,581 charts, calibration slope 0.996, CV

@@ -1,6 +1,6 @@
 ITGMANIA / SIMPLY LOVE: DISPLAYING THE MODELED RATING IN PLACE OF THE OFFICIAL METER
 =====================================================================================
-REVISION: 2026-10-13-a | file: itgmania_display_meter_findings.txt
+REVISION: 2026-10-30-b | file: itgmania_display_meter_findings.txt
 
 FILE STATUS (map of all files: /INDEX.md)
   STATUS:        ACTIVE; patch rebuilt 2026-10-13 (patches/sl_display_meter.patch), checked with git apply and a
@@ -12,7 +12,7 @@ FILE STATUS (map of all files: /INDEX.md)
                  Pack.ini DifficultyMode, IniFile.ReadFile, theme pref, memoize
   READ WHEN:     the task is to show DifficultyModel ratings instead of (or beside) the official
                  meter, to make that global or per-pack, or to replace the DifficultyModelCheck overlay.
-  SEE ALSO:      itgmania_difficulty_rating_writeup.txt (model, limits); claude/DifficultyModel.lua;
+  SEE ALSO:      itgmania_difficulty_rating_writeup.txt (model, limits); tools/difficulty/DifficultyModel.lua;
                  patches/sl_display_meter.patch.
 Tags: [CODE] read in source (file given), [INFERRED] reasoned, not run, [UNVERIFIED] not determined,
       [TESTED-MOCK] ran in a stub Lua environment here (not the game).
@@ -126,7 +126,7 @@ CHANGES IN REVISION 2026-10-13-a (the patch was rebuilt from a clean dd06138 che
     evaluation Storage.lua (Number; feeds the summary screen), SL-PlayerOptions.lua Chart row (wide; both
     "%i" formats changed to "%s").
   Filter sites routed through DisplayMeter.Matches: SortMenu/default.lua, SongSearch/SongSearchSettings.lua.
-  DEPENDENCY: claude/DifficultyModel.lua must already be in the theme's Scripts folder (the patch does not
+  DEPENDENCY: tools/difficulty/DifficultyModel.lua must already be in the theme's Scripts folder (the patch does not
     include it). Without it every site shows the official meter.
   Not changed: see sections 1-2 (CustomScores, nice.lua, Casual, StepsToDisplay, engine sorts, EditMenu).
   Does NOT touch the DifficultyModelCheck overlay: remove or disable it separately (section 7).

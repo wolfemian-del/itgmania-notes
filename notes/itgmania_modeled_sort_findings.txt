@@ -1,6 +1,6 @@
 ITGMANIA / SIMPLY LOVE: SORTING THE MUSIC WHEEL BY THE MODELED DIFFICULTY RATING
 ================================================================================
-REVISION: 2026-10-24-a | file: notes/itgmania_modeled_sort_findings.txt
+REVISION: 2026-10-30-a | file: notes/itgmania_modeled_sort_findings.txt
 
 FILE STATUS (map of all files: /INDEX.md)
   STATUS:        NEW 2026-10-24. READ-ONLY source findings and design evaluation. No code written, nothing
@@ -12,7 +12,7 @@ FILE STATUS (map of all files: /INDEX.md)
   READ WHEN:     the task is to add a sort/section by modeled difficulty to the wheel, or to port the model
                  to C++, or to add any new SortOrder.
   SEE ALSO:      notes/itgmania_display_meter_findings.txt (display side; its section 2 says the wheel Meter
-                 sort stays official); claude/itgmania_difficulty_rating_writeup.txt; claude/DifficultyModel.lua;
+                 sort stays official); notes/itgmania_difficulty_rating_writeup.txt; tools/difficulty/DifficultyModel.lua;
                  notes/itgmania_beta_findings.txt 7r (SORT_SERIES / IsSongSort on beta);
                  notes/itgmania_toggle_findings.txt 7w (wheel timing).
 Tags: [CODE] read in source (file/function given), [INFERRED] reasoned, not run, [UNVERIFIED] not determined.
@@ -169,7 +169,7 @@ Tags: [CODE] read in source (file/function given), [INFERRED] reasoned, not run,
 6. OPTIONS AND CHALLENGES
   A. New engine sort SORT_MODELED_METER, model ported to C++ (RECOMMENDED).
      Work: C++ rating function (new file, e.g. src/ModeledRating.cpp/.h, coefficients generated from
-     claude/difficulty_model_notech.json by a variant of make_lua_rating.py so Lua and C++ share one
+     tools/difficulty/difficulty_model_notech.json by a variant of make_lua_rating.py so Lua and C++ share one
      source); copy of UpdateMeterSort keyed by modeled rating (plus an "Unrated" bucket); one wheel section
      loop; enum/name/IsSongSort edits; ScreenSelectMusic.cpp:1915 and MusicWheel.cpp:356 branches extended
      to the new sort with the modeled rating instead of GetMeter(); SL: one menu line + one string.

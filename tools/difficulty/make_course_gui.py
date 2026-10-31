@@ -9,8 +9,8 @@ and save a .crs.
 Needs (all in the same folder):
     make_course_gui.py            this file
     make_course_by_rating.py      the engine room (rating + picking + writing)
-    extract_chart_features.py     cache parser (from the project's claude/ folder)
-    difficulty_model_notech.json  the deployed model (from claude/)
+    extract_chart_features.py     cache parser (same folder)
+    difficulty_model_notech.json  the deployed model (same folder)
 Standard library only (tkinter ships with the python.org Windows installer;
 on Linux it may need the python3-tk package).
 

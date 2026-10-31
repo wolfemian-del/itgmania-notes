@@ -18,11 +18,9 @@ Each note names the version it applies to. Behavior may differ in newer releases
 | Path | Contents |
 |---|---|
 | `INDEX.md` | Entry point: topics, status of every file, open work |
-| `notes/` | Findings files (engine map, series-adjacent, courses, sorting, offsets, scoring, CodeQL, etc.) |
-| `patches/` | Newer patches (`git apply`); see INDEX for status of each |
-| `tools/difficulty/`, `tools/course/` | Course builder (script and GUI), `.crs` parser tests |
-| `claude/` | Difficulty-model scripts, model JSON, generated `DifficultyModel.lua`, cache format spec, writeup |
-| repo root | Older notes (series, editor, input, padsensor, misc, toggle sketch, difficulty-rating archive) and older patches |
+| `notes/` | Findings files (engine map, series, editor, input, courses, sorting, offsets, scoring, CodeQL, difficulty writeup and cache spec, etc.) |
+| `patches/` | Patches (`git apply`); see INDEX for status of each |
+| `tools/difficulty/`, `tools/course/` | Course builder (script and GUI), difficulty-model scripts, model JSON, `DifficultyModel.lua`; `.crs` parser tests |
 
 Scripts import each other by name; keep `extract_chart_features.py` and `difficulty_model_notech.json` beside the course scripts when running them.
 

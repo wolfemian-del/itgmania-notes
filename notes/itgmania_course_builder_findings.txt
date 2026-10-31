@@ -1,10 +1,10 @@
 ITGMANIA COURSE BUILDER (COURSES FROM MODELED DIFFICULTY) - FINDINGS
-REVISION: 2026-10-28-i | file: notes/itgmania_course_builder_findings.txt
+REVISION: 2026-10-30-a | file: notes/itgmania_course_builder_findings.txt
 
 FILE STATUS
   Status:     ACTIVE. Script and GUI written and mock-tested; NOT run on the user's real cache; no .crs loaded in game.
   Basis:      engine v1.3.0 8a3bf8884a (src/CourseLoaderCRS.cpp, Course.cpp, Difficulty.cpp, Song.cpp, MsdFile.cpp,
-              SongManager.cpp read 2026-10-24); deployed model claude/difficulty_model_notech.json
+              SongManager.cpp read 2026-10-24); deployed model tools/difficulty/difficulty_model_notech.json
   Topic key:  course
   Read when:  building or debugging .crs files made from modeled ratings; Course file syntax questions
   See also:   engine:3, display (same model, same cache data), msort (same Unrated rules), writeup (model limits)
