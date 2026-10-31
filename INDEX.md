@@ -1,33 +1,30 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-10-30-j | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-10-30-k (repo-canonical workflow; Project docs deprecated) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
 
-GITHUB COPY (2026-10-30): this repo (wolfemian-del/itgmania-notes) is the canonical copy of these files; the
- Project copies are working copies. Paths in this file are repo paths. The superseded itgmania_engine_notes.txt
- is intentionally not in the repo. Filenames use underscores (claude/apply_model.py, claude/difficulty_model_notech.json).
- Files are not licensed for reuse beyond the NOTICE file; see README.md.
+REPO WORKFLOW (2026-10-30): the GitHub repo wolfemian-del/itgmania-notes IS the canonical store. There is no
+ second copy: the old Project docs are deprecated and must not be edited. All paths in this file are repo paths.
+ Edit files in place and commit; git history replaces whole-file re-typing, and files may be moved with git mv.
+ itgmania_engine_notes.txt (superseded) is intentionally not in the repo. Licensing: see NOTICE.
 
 HOW TO START A CHAT
  1. Read this file. Pick the topic row(s) below; read only those files/sections.
  2. For source work read notes/itgmania_engine_notes_v3.txt sections 0-2, 5, 6 and 8 (task,
     workspace setup, architecture map, to-do list, KNOWN-WRONG CLAIMS).
- 3. Check the Project doc list against the FILE STATUS TABLE; report anything missing or
-    unlisted before other work. Do not ask the user to re-upload a file until the
-    doc list and the documents block are both checked. (The old "ls /mnt/project" check
-    was removed 2026-10-12: it kept hitting a container rate limit.)
+ 3. Check the repo against the FILE STATUS TABLE (git ls-files); report any file that is missing from the
+    table or listed but absent before other work. Do not ask the user to re-upload a file that is in the repo.
  4. Cite sections with the file prefix: engine (core v3), loadmem, toggle, beta, series,
     sketch, diffnotes, display, reload, offrec, codescan, msort, course, cref, score, e.g. "loadmem:7q", "series:12h", "sketch:I3", "diffnotes:11",
     "display:4", "offrec:7", "codescan:5", "msort:3", "course:5", "cref:7". Bare "section 7" is ambiguous. Older files still say
     "engine notes 7x": use the SECTION MAP below to find where 7x lives now.
  5. When a file changes: bump its REVISION, update its row in the status table and the
     topic table, tell the user.
- 6. GRADUAL MOVE INTO FOLDERS (user's rule, 2026-10-12): when a note, patch, script or
-    writeup is edited for new findings, write the revised file to its folder path (see
-    FOLDER LAYOUT: notes/, patches/, tools/difficulty/, writeups/), then delete the old flat
-    copy, update its row here (path + revision) and tell the user. Do not re-type a file just
-    to move it. Files edited this way also get a FILE STATUS header if they lack one.
+ 6. WHEN A FILE CHANGES: commit it in place (bump its REVISION line and its row here in the same commit),
+    use a plain-language commit message, and tell the user which paths changed. Moving files into the target
+    folders is allowed with git mv, in a commit that also updates the paths in this file. Files edited for
+    new findings also get a FILE STATUS header if they lack one.
 
 SECTION MAP (former itgmania_engine_notes.txt, split 2026-10-12; section IDs unchanged)
  engine (notes/itgmania_engine_notes_v3.txt): 00, 0, 1, 2, 3, 3a, 5, 5b, 6, 8 (4 = pointer)
@@ -119,7 +116,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   tools/course/extract_mod_tokens.py | NEW 2026-10-30: pulls the mod literals/numbered families/find() gates out of PlayerOptions.cpp lines 768-1521 into JSON (usage: python3 -I extract_mod_tokens.py out.json; path to the checkout is hard-coded to /home/claude/itgmania) | v1.3.0 | 2026-10-30 | none
  Root: INDEX.md (this file)
  NOTE: older notes write patch names with dots (..._v1.3.0.patch) or underscores
-   (..._v1_3_0.patch); the Project copies use the names above. Same files.
+   (..._v1_3_0.patch); the repo uses the names above. Same files.
 
 GITHUB FORKS (user's; Claude may commit and push there directly, user's rule 2026-10-13)
  Engine: github.com/wolfemian-del/itgmania (upstream itgmania/itgmania; default branch release)
@@ -158,39 +155,18 @@ GITHUB FORKS (user's; Claude may commit and push there directly, user's rule 202
   changes to the workflow/config or manual dispatch (see codescan:7). The session credential cannot read
   alerts (API 403 2026-10-15); the user pastes alert text. State 2026-10-16: 0 open alerts.
 
-STANDING PROCESS FOR LEGACY FLAT FILES (user agreed 2026-10-13; leave them flat otherwise)
- - Legacy flat files are NOT bulk-moved. Reason [TESTED 2026-10-13]: project_read always returns the
-   text inline (even 76 kB), never a local file, so a copy would be re-typed with no byte check; the
-   desktop Project UI cannot create folders or move files.
- - When a legacy file is going to be rewritten anyway (new revision, refactor, or the user attaches its
-   current copy), write the new version to its TARGET folder path (below), then project_delete the old
-   flat path, and update the file map/status table, the manifest rows and any "SEE ALSO" cross-references
-   in the same turn. Tell the user which paths changed. Never move a file only to move it.
- - Exception: a user-attached copy on disk can be written with project_write local_path (byte-exact; check
-   sha256 of the local file against the attachment first) and moved without a rewrite.
- - Before deleting an old path, confirm the new path appears in project_info.
+FOLDER LAYOUT (repo paths)
+ Applied: notes/ (findings files incl. the 4 engine splits), patches/ (newer patches), tools/difficulty/, tools/course/,
+   claude/ (difficulty-model scripts, model JSON/Lua, cache spec, writeup), INDEX.md/README.md/NOTICE at the root.
+ Still flat at the root: the older notes (series, editor, editor_clipboard_mouse, input, padsensor, misc, pack_toggle_sketch,
+   difficulty_rating_notes) and the older .patch files. Optional target (git mv, update paths here in the same commit):
+   notes/ the older *_notes.txt and the sketch    patches/ all .patch files
+   tools/difficulty/ or claude/ scripts and model files    writeups/ the difficulty writeup
+ New files: always give an explicit folder path; never create new files at the root except INDEX/README/NOTICE.
+ Filenames use underscores; scripts import each other by exact name (extract_chart_features.py,
+   difficulty_model_notech.json). Keep them beside the course scripts when running them.
 
-FOLDER LAYOUT (PARTLY APPLIED 2026-10-12; "path" = Project doc path)
- Applied: notes/ holds the 4 split files (engine v3, loadmem, toggle, beta), the display-meter
-   findings, the reload-profile evaluation, the offset-recommendation findings, the code-scanning
-   findings, the modeled-sort findings, the course-builder findings and the course-format reference; patches/ holds
-   sl_toggle_songs_manual_edits.txt, sl_display_meter.patch, reload_keep_default_profile.patch,
-   palettize_free_colormap.patch and codeql_filter_extern.patch; tools/difficulty/ holds
-   make_course_by_rating.py and make_course_gui.py (first files there; the older scripts and model files are still in claude/);
-   tools/course/ holds the parser test and token extractor; INDEX.md stays at the root.
- NOT applied (still flat at the root or in claude/): the other notes, the sketch, the older .patch
-   files, the writeup, the older scripts, the model files. Reason: the Project tools cannot move a
-   file, only write a new copy and delete the old one, and a copy needs the full text. Only
-   files held locally could be moved safely; re-typing patches and scripts risks breaking
-   whitespace-sensitive code, and re-typing 12-40 kB notes cannot be diffed.
- Target if the rest is ever moved (file names unchanged):
-   notes/ remaining itgmania_*_notes.txt, sketch, series notes, diffnotes
-   patches/ all .patch files    tools/difficulty/ scripts, model json/lua, cache spec
-   writeups/ itgmania_difficulty_rating_writeup.txt
- Note: a new file written with a bare name lands in claude/; use an explicit folder path,
-   or "/name" for the root.
-
-KNOWN GAPS IN THE FILES (as of this revision)
+KNOWN GAPS IN THE FILES (as of this revision; entries written before 2026-10-30 refer to the Project era: "re-typed" = rewritten whole through the Project tools, "Project copies" = the now-deprecated Project docs)
  - Stage-2 split done 2026-10-12 (new filenames). The user still has to compare and delete
    itgmania_engine_notes.txt; both copies are in the Project until then. The 4 new files were
    typed section by section from the old one; every section ID was checked to appear exactly
@@ -203,8 +179,6 @@ KNOWN GAPS IN THE FILES (as of this revision)
    re-typing 20-30 kB with no way to diff it. Their rows in the table serve instead. Patches,
    scripts and JSON were left untouched on purpose (whitespace-sensitive code, no comment syntax).
  - diffnotes section 11 repeats the deployed-model and in-game entries; use the writeup.
- - Project instructions still name itgmania_engine_notes.txt first; the user should change
-   step 1 to "read INDEX.md first" (and drop the ls step if any trace remains).
  - The difficulty writeup (claude/itgmania_difficulty_rating_writeup.txt) does not yet mention the
    display-meter work, the modeled-sort evaluation or the course builder; its open items (section 10) are unchanged. See display notes
    section 7, msort:6 and course:1.
