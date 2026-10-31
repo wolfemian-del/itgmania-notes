@@ -1,0 +1,8 @@
+Licensing notice (2026-10-30)
+
+- The patches in this repository modify ITGmania and Simply Love, which are distributed under their own
+  licenses (ITGmania: GPL; see https://github.com/itgmania/itgmania). Patches and code derived from those
+  projects are provided under the same license as the files they modify.
+- Notes, scripts and tools written for this repository have no separate license chosen yet.
+  The owner should pick one (for example MIT for scripts, CC BY 4.0 for notes) and replace this file.
+  Until then, all rights are reserved by the author apart from what the upstream licenses require.

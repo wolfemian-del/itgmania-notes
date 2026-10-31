@@ -4,6 +4,11 @@ Purpose: find the right file and section without reading everything. Not a findi
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
 
+GITHUB COPY (2026-10-30): this repo (wolfemian-del/itgmania-notes) is the canonical copy of these files; the
+ Project copies are working copies. Paths in this file are repo paths. The superseded itgmania_engine_notes.txt
+ is intentionally not in the repo. Filenames use underscores (claude/apply_model.py, claude/difficulty_model_notech.json).
+ Files are not licensed for reuse beyond the NOTICE file; see README.md.
+
 HOW TO START A CHAT
  1. Read this file. Pick the topic row(s) below; read only those files/sections.
  2. For source work read notes/itgmania_engine_notes_v3.txt sections 0-2, 5, 6 and 8 (task,
@@ -13,7 +18,7 @@ HOW TO START A CHAT
     doc list and the documents block are both checked. (The old "ls /mnt/project" check
     was removed 2026-10-12: it kept hitting a container rate limit.)
  4. Cite sections with the file prefix: engine (core v3), loadmem, toggle, beta, series,
-    sketch, diffnotes, display, reload, offrec, codescan, msort, course, cref, e.g. "loadmem:7q", "series:12h", "sketch:I3", "diffnotes:11",
+    sketch, diffnotes, display, reload, offrec, codescan, msort, course, cref, score, e.g. "loadmem:7q", "series:12h", "sketch:I3", "diffnotes:11",
     "display:4", "offrec:7", "codescan:5", "msort:3", "course:5", "cref:7". Bare "section 7" is ambiguous. Older files still say
     "engine notes 7x": use the SECTION MAP below to find where 7x lives now.
  5. When a file changes: bump its REVISION, update its row in the status table and the
@@ -74,6 +79,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   notes/itgmania_modeled_sort_findings.txt | NEW 2026-10-24: ACTIVE read-only findings and design evaluation; nothing built or run; decisions msort:6 D1-D4 and in-game checks msort:8 open | engine v1.3.0 8a3bf8884a; beta eac008e0ac (enum, IsSongSort and Meter-sort call sites only); Simply Love dd06138 | 2026-10-24-a | FS
   notes/itgmania_course_builder_findings.txt | NEW 2026-10-24: ACTIVE; .crs syntax and course loading read from source; script and GUI mock-tested only; in-game checks section 7 open; 5.3 and 10.1 are extended by cref | engine v1.3.0 8a3bf8884a; model difficulty_model_notech.json | 2026-10-28-i | FS
   notes/itgmania_course_format_reference.txt | NEW 2026-10-30: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files) | 2026-10-30-j | FS
+  notes/itgmania_score_matching_findings.txt | NEW 2026-10-25: ACTIVE read-only findings; nothing built or run; how a stepfile is matched to a score in a profile (renaming/moving songs, Stats.xml, edit charts); cite as score:N | engine v1.3.0 8a3bf8884a; beta NOT checked | 2026-10-25-b | FS
   itgmania_engine_notes.txt | SUPERSEDED by the four files above (same content, split); delete after the user compares | v1.3.0 | 2026-10-07-b | REV
   itgmania_series_notes.txt | ACTIVE, complete | v1.3.0; section 12 = beta e4b4bf0755 | 2026-10-04-a | REV
   itgmania_pack_toggle_sketch.txt | ACTIVE; open test list Part I3 | v1.3.0; patches apply to beta c8e69b9ca8 (git apply --check, not compiled) | 2026-10-07-b | REV
