@@ -1,0 +1,1171 @@
+ITGMANIA ENGINE ANALYSIS - MODEL RESUME NOTES
+=============================================
+REVISION: 2026-10-07-b | file: itgmania_engine_notes.txt | bytes: 76512
+Rev 2026-10-07-b: adds 7w (user wheel-timing round on a 5406-song library; items 24-26 done); manifest, section 6 item 11 updated; sketch gets Part I4.
+Rev 2026-10-07-a: adds 7v (user test round of toggle UI / SL patches / search shortcut; service-menu Reload Songs profile-clearing finding); section 6 items 11-12 and section 8 items 13-14 updated; manifest updated; sketch gets Part I.
+Rev -c: sketch Part C and series-notes correction blocks compressed (new files rev -a); manifest rows updated; NO new code findings.
+Refactor of rev 2026-10-04-a (93502 bytes); NO new code findings. Changes:
+content that duplicates a companion file is cut to a headline + pointer;
+inline correction history is collected in section 8 (known-wrong claims);
+resolved to-do text is collapsed; section IDs (00, 0-6, 7b-7u) are kept
+because other files cite them; section 8 is new.
+Audience: the model (Claude), to resume analysis after a usage-limit
+interruption or in a new chat. User-facing writeups come later.
+Companion files (plain text, in project knowledge):
+  itgmania_series_notes.txt, itgmania_editor_notes.txt,
+  itgmania_editor_clipboard_mouse_notes.txt, itgmania_input_notes.txt,
+  itgmania_padsensor_notes.txt, itgmania_misc_notes.txt (WASAPI, BrokeIO,
+  show-one-in-row, websocket deflate), itgmania_pack_toggle_sketch.txt
+  (engine sketch + patch descriptions, Parts A-H), and the patches
+  itgmania_pack_toggle_v1_3_0.patch, itgmania_pack_toggle_ui_v1_3_0.patch,
+  sl_toggle_songs.patch (+ sl_toggle_songs_manual_edits.txt),
+  wheel-timing-log.patch (pref LogWheelTimings; Log.txt "WheelTiming:"),
+  itgmania_clang_format_fix.patch (apply last), sl_song_search_shortcut.patch
+  (Simply Love only, see 7m).
+  FILENAME NOTE: project copies of the patches use UNDERSCORES
+  (..._v1_3_0.patch); older text writes dots. Same files.
+Written 2026-09-29. Tags: [CODE] read in source, [INFERRED] reasoned from
+code, not run, [UNVERIFIED] not determined, [TODO] not yet done, [TESTED]
+user-run or synthetic test (source named).
+ 
+ 
+00. FILE MANIFEST AND START-OF-CHAT CHECK
+-----------------------------------------
+Why: the sandbox copy of /mnt/project is a snapshot made when the chat's
+sandbox starts; a file replaced around then can be missing or stale there.
+Model procedure, FIRST ACTION of every chat:
+  1. Run ls -l /mnt/project/ ; compare names and byte sizes with the table.
+  2. Classify every file and report any non-OK BEFORE other work:
+       OK        listed, present, size matches.
+       MISSING   listed but absent from ls: use the in-context copy, say so.
+       DIFFERS   present, size differs: say which copy (sandbox or
+                 in-context) is used.
+       UNLISTED  present in ls or documents block but NOT in the table: the
+                 manifest is out of date, the file is NOT new. Say "present,
+                 not in the manifest", add a row at the next edit, ask the
+                 user for NOTHING.
+     Also compare the documents block with ls: in the block but absent from
+     ls = stale sandbox snapshot (added after the chat started); say so.
+     RULE: never ask the user to add/upload/replace a project file until
+     BOTH ls and the documents block are checked and the file is absent from
+     both, or its in-context copy is older than a copy the user says they
+     uploaded. When unsure, ask which copy is current.
+  3. IF ls FAILS (seen 2026-10-04: "Container rate limit reached for this
+     organization"; a retry minutes later worked): say so in one line, use
+     the in-context copies, treat sizes as unverified, retry at most once.
+  4. When a file is changed: bump revision (YYYY-MM-DD-letter), recompute
+     bytes (REVISION line AND table), present it, tell the user the new size
+     in kB (1 kB = 1000 bytes, as the project panel shows it).
+User procedure: replace project files at the END of a chat, never mid-chat;
+start a fresh chat afterwards; compare panel sizes with the table. For a
+refactor the model writes to a NEW filename first; the user compares, then
+replaces the old file.
+Table (bytes). "no stamp" = unchanged since the 2026-10-02 listing.
+  itgmania_engine_notes.txt              rev 2026-10-07-b  76512
+  itgmania_editor_notes.txt              rev 2026-10-03-a  21010
+  itgmania_pack_toggle_sketch.txt        rev 2026-10-07-b  36611
+  itgmania_series_notes.txt              rev 2026-10-04-a  21759
+  itgmania_editor_clipboard_mouse_notes.txt no stamp 11770
+  itgmania_input_notes.txt               no stamp   06655
+  itgmania_padsensor_notes.txt           no stamp   13603
+  itgmania_misc_notes.txt                no stamp   27015
+  itgmania_pack_toggle_v1_3_0.patch      no stamp   10031
+  itgmania_pack_toggle_ui_v1_3_0.patch   no stamp   08000
+  sl_toggle_songs.patch                  no stamp   03466
+  sl_toggle_songs_manual_edits.txt       no stamp   02123
+  wheel-timing-log.patch                 no stamp   03554
+  itgmania_clang_format_fix.patch        no stamp   00506
+  sl_song_search_shortcut.patch          no stamp   04805
+Check log: 2026-10-02: engine notes absent from /mnt/project (stale
+snapshot); wheel-timing-log.patch wrongly called "new" (no UNLISTED outcome
+then; added); clang patch uploaded after chat start was in the documents
+block but not in ls. 2026-10-04: first ls hit a container rate limit; the
+retry showed all 15 files OK (262277 bytes total with the old 93502-byte
+engine notes).
+2026-10-04 (compression chat): ls hit the rate limit three times, then showed
+all 15 files OK (237227 bytes total). New files written as *_v2.txt.
+2026-10-07 (wheel-timing chat): ls OK, all 15 files present, sizes matched the table.
+2026-10-07 (testing chat): ls OK, all 15 files present with sizes matching the table (237227 bytes total before this update).
+ 
+ 
+0. THE TASK AND THE USER
+------------------------
+- User finds ITGmania docs incomplete for recent features. Repo:
+  https://github.com/itgmania/itgmania.
+- First case: "Series" (v1.3.0), done (series notes). Then performance and
+  memory questions about section grouping (section 4).
+- 2026-09-30: user set the to-do list aside for a practical feature idea
+  (pack/song toggle, 7f); it was patched, built and field-tested (7g, 7h, 7n).
+- Format preference: PLAIN TEXT writeups for now; a second stage later turns
+  notes into user-oriented docs. Keep tags and technical detail.
+- User knows I cannot run the game (no display). Label every claim.
+- User is a novice builder (Windows 11, GitHub Actions fork builds).
+ 
+ 
+1. HOW TO RE-CREATE THE WORKSPACE (sandbox resets between chats)
+----------------------------------------------------------------
+  cd /home/claude
+  git clone --quiet https://github.com/itgmania/itgmania.git
+  cd itgmania && git checkout -q v1.3.0      # commit 8a3bf8884a
+  # Simply Love is a git SUBMODULE (empty after clone). Fetch it:
+  git clone --quiet --depth 1 https://github.com/Simply-Love/Simply-Love-SM5.git /home/claude/sl
+  # v1.3.0 pins Simply Love dd06138 (shallow clone matched on 2026-09-29).
+- Network: github.com, api.github.com, raw.githubusercontent.com allowed;
+  general web search works. api.github.com is rate-limited without a token:
+  use git instead.
+- Tags: v1.0.2 v1.1.0 v1.2.0 v1.2.1 v1.3.0. Default branch "release" =
+  v1.3.0. Development is on "beta": head e4b4bf0755 (author 2026-09-18,
+  committer 2026-10-03), 84 commits over v1.3.0 [CODE, 7r]. Fetch:
+  git fetch origin beta:beta ; PR heads: git fetch origin pull/1488/head:pr1488
+- Useful: git log v1.2.1..v1.3.0 -i --grep=series ; grep -rIn -i WORD src
+ 
+ 
+2. ARCHITECTURE MAP  [CODE unless noted]
+----------------------------------------
+Engine is C++ (StepMania 5.1 fork) in src/; themes are Lua/INI under
+Themes/. Docs: Docs/Luadoc/LuaDocumentation.xml (hand-written Lua API),
+Docs/Userdocs, Themerdocs, Devdocs, Changelog_sm5.txt.
+ 
+Data model
+  SongManager (SONGMAN) owns all Song*, Group*, Course*. Maps:
+    m_mapNameToGroup (Group by folder name), m_mapNameToSeries (name,
+    set<Group*>, banner path).
+  Group: one per pack folder; parses Pack.ini. Song: one per song folder;
+  owns Steps. Steps: a chart (note data lazy, metadata resident).
+  GameState (GAMESTATE): sort order, expanded section names.
+ 
+Song loading - SongManager::LoadSongDir (ONE call, for "Songs/"; extra song
+  folders are VFS mounts merged into it, see 7p)
+  1 list pack folders (sorted); 2 sanity-check each; 3 list song folders per
+  pack; 4 build one flat song list; 5 load all songs on a thread pool
+  (hardware_concurrency threads) via Song::LoadFromSongDir. FastLoad=true
+  (default) loads from a per-song cache file (SSC format, no note data) when
+  valid, else parses the simfile. Group(sDir, sGroupDirName) reads Pack.ini.
+ 
+Music wheel (MusicWheel.cpp, WheelBase.cpp, MusicWheelItem.cpp)
+  - Per sort order: BuildWheelItemDatas -> unfiltered vector cached in
+    m__UnFilteredWheelItemDatas; FilterWheelItemDatas -> m__WheelItemDatas.
+    Status INVALID / NEEDREFILTER / VALID. BeginScreen marks built sorts
+    NEEDREFILTER (refilter on each entry); SORT_PREFERRED always rebuilds.
+    Pref PreCacheAllWheelSorts (default false) builds all sorts eagerly.
+  - SetOpenSections rebuilds m_CurWheelItemData by walking the WHOLE
+    filtered list, skipping non-visible rows (songs show only if their group
+    section is expanded).
+  - WheelBase keeps a small fixed vector of display actors (NUM_WHEEL_ITEMS,
+    metric NumWheelItems) rebound to data near the cursor.
+  - Sort enum in GameConstantsAndTypes.h; SongUtil::SortSongPointerArrayBy*.
+Themes: Themes/_fallback (engine defaults); Simply Love (submodule) is the
+  main real-world theme.
+Disk caches (Cache/): per-song SSC cache, image cache (images + images.cache
+  index), song index (SongCacheIndex).
+ 
+ 
+3. SERIES FEATURE - STATE (full detail: itgmania_series_notes.txt)
+------------------------------------------------------------------
+Complete for v1.3.0. Headlines:
+  - Pack.ini [Group] keys Series, SeriesBanner; Version must be non-empty or
+    the whole file is ignored.
+  - SORT_SERIES creates ParentSection wheel rows: Series -> Group -> Song.
+  - Banner: first loaded pack with a resolvable SeriesBanner, else the banner
+    of the alphabetically first pack folder name.
+  - v1.3.0: every non-empty Series gets a parent row, even for one pack.
+    Beta hides it for single-pack series (05507f6b40). PR #1488 (sukibaby) is
+    a second implementation, closed unmerged (7s).
+  - Simply Love: Series is the default sort ("DefaultSort"); theme pref
+    HideInactiveSeries -> engine metric OnlyShowActiveParentSection.
+  - Commits: 5cda97c0fb (2026-04-09 SORT_SERIES), 36dc1925bd (2026-06-22
+    SeriesBanner), 0c85f6c2c3 (2026-06-29 docs). Proposal: issue #266.
+  - Beta re-diff: series files unchanged since 28e58a78c7 (7r).
+ 
+3a. SeriesBanner "first loaded" order (v1.3.0) [CODE: SongManager.cpp
+    LoadSongDir ~438-500, ~650-678, AddGroup ~396-414, GetSeriesBannerPath
+    ~834-857; RageUtil.cpp 893-906; StdString.h 55]
+  - SortRStringArray uses CompareNoCase (case-insensitive) but its output
+    goes into std::map<string,vector<string>> mapGroupSongDirs; later loops
+    iterate the map = byte order, CASE-SENSITIVE (uppercase before
+    lowercase). AddGroup (which sets the Series banner) runs in that order.
+  - The fallback banner (GetSeriesBannerPath) uses the min group name by
+    std::string operator<, consistent with the above.
+  - Groups with 0 loaded songs are erased before AddGroup.
+  - Not tested; check: folders "Zeta" and "alpha" both defining SeriesBanner.
+ 
+ 
+4. PERFORMANCE / MEMORY FINDINGS (v1.3.0 unless noted)
+------------------------------------------------------
+Question asked: does section grouping limit what is held in memory, or only
+hide rows? ANSWER: it only hides rows. No measurement made.
+ 
+4a. Wheel layer [CODE]
+  - All songs' wheel data exists for each visited sort order (built once,
+    cached). Open/close of a section is O(total items) pointer work. The
+    refilter walk on each screen entry is O(total songs). Series sort adds
+    one header row per series (small, linear).
+ 
+4b. Chart (note) data lifecycle [CODE]
+  - Steps::Compress() frees m_pNoteData and m_sNoteDataCompressed when the
+    chart has a file on disk and is not a profile edit; skipped when
+    GAMESTATE->m_bInStepEditor; lights_cabinet charts stay resident;
+    profile-loaded edits are re-compressed in memory.
+    Steps::Decompress() re-reads/parses the simfile every time
+    (GetNoteDataFromSimfile) [INFERRED: repeated access = repeated disk
+    parse; not measured].
+  - Compress callers: Song::LoadFromSongDir tail (all Steps), SongManager::
+    Cleanup() (called from ScreenManager AfterDeleteScreen = EVERY screen
+    delete, after DeleteCachedTextures), ScoreKeeperNormal, Steps::
+    GetChartKey (Decompress, hash, Compress), Steps::DeAutogen.
+  - Always resident per chart (from cache-file tags): RadarValues,
+    TechCounts, NpsPerMeasure, NotesPerMeasure, PeakNps, Timing data,
+    NoteAnnotations (compressed base64 string). Chart-derived memory scales
+    with total charts x chart length even with note data released
+    [CODE for what is kept; magnitude UNVERIFIED].
+  - POSSIBLE BUG (by-value loop): Steps::Compress() does
+    `for (NoteAnnotationCache annotationCache : m_NoteAnnotations)
+     annotationCache.Compress();` which iterates COPIES, so the real caches'
+    `decompressed` vectors are never cleared. Once Steps::GetNoteAnnotations()
+    has been called on a chart its decompressed vector stays until the song
+    reloads. Same by-value pattern in GetAllNoteAnnotations (harmless).
+    Impact is limited to charts whose annotations are requested (4e: no
+    shipped theme does) [CODE for the loop; INFERRED for impact; not tested;
+    an observation, not a confirmed leak].
+ 
+4c. Banner / image memory [CODE]
+  - Pref "ImageCache" default IMGCACHE_LOW_RES_PRELOAD (PrefsManager.cpp).
+    Modes: OFF, LOW_RES_PRELOAD, LOW_RES_LOAD_ON_DEMAND, FULL.
+  - PRELOAD: every song's cached images are loaded into RAM at song-load time
+    and kept for the process (g_ImagePathToImage in ImageCache.cpp);
+    UnloadAllImages runs only on Undemand (on-demand mode) or shutdown/reload.
+  - Which images: theme metric [Common] ImageCache. _fallback = "Banner".
+    Simply Love = "Banner,Background,Jacket" only if its UseImageCache pref is
+    on (default OFF), else "Banner"; SL's help text says it uses "a LOT more
+    RAM" (recommends >= 8 GB).
+  - Cached size: each dimension halved then rounded to nearest power of two;
+    Banner capped at 256x128; stored 16-bit A1RGB5 (2 B/px) unless
+    PalettedImageCache (default false). A banner surface is at most 256*128*2
+    = 64 KiB (256x64 = 32 KiB). Rough total = songs-with-banners x 32-64 KiB,
+    e.g. ~10k banners = ~320-640 MB [INFERRED arithmetic; ImageTexture may
+    convert the surface and change the size; not measured].
+  - GPU: LoadCachedImage registers a TEX_VOLATILE texture and unloads it at
+    once; textures are created when shown; RageTextureManager::GarbageCollect
+    and DeleteCachedTextures drop zero-refcount textures on screen changes.
+    VRAM use is small; the RAM surfaces are the resident cost.
+  - Display: wheel song rows use TextBanner (text). The highlighted item's
+    banner goes through ScreenSelectMusic (g_sBannerPath) -> Banner::
+    LoadFromCachedBanner. Themes drawing images in wheel rows [UNVERIFIED].
+    With cache off/FULL or a missing cached texture, Banner loads the
+    full-size file from disk.
+ 
+4d. ImageCache Demand/Undemand (v1.3.0; re-checked on beta, 7s)
+  [CODE unless noted]
+  - Callers (complete grep of src/, no Lua binding): ScreenSelectMusic::
+    BeginScreen Demand("Banner") (~216); ~ScreenSelectMusic Undemand (~341);
+    EditMenu ctor path Demand (~147); ~EditMenu Undemand (~105).
+  - Mechanics (ImageCache.cpp ~92-135): global g_iDemandRefcount. Demand: ++;
+    returns if >1 or if pref != LOW_RES_LOAD_ON_DEMAND; else loads a cache
+    surface for every ImageData entry not already in g_ImagePathToImage.
+    Undemand: --; at 0 (and ON_DEMAND) calls UnloadAllImages(). In PRELOAD,
+    FULL and OFF modes they only change the refcount. In ON_DEMAND mode the
+    surfaces are resident only while a ScreenSelectMusic or EditMenu exists.
+  - ImageCache::OutputStats has NO callers in src/, so it cannot show size.
+  Observations [INFERRED, not tested]:
+    a) Demand passes dir "Banner" for EVERY entry, and g_ImagePathToImage is
+       keyed by path only; with Simply Love UseImageCache on
+       ("Banner,Background,Jacket"), Background/Jacket surfaces are probably
+       NOT demand-loaded (they fall back to disk loads in ON_DEMAND mode).
+    b) Song::TidyUpData (~727) calls IMAGECACHE->LoadImage per image dir with
+       no pref check, only when !from_cache. In ON_DEMAND mode, first-time
+       (uncached) song loads put surfaces into memory at startup, freed at
+       the first Undemand reaching 0 (first song-select exit). Cached loads
+       (~450) are guarded by == PRELOAD. One-time, uncached songs only.
+    c) ScreenSelectMusic is destroyed/recreated across gameplay: in ON_DEMAND
+       mode each return re-reads all banner cache files and each exit frees
+       them. Cost per re-entry not measured.
+  User check: ImageCache=LowResLoadOnDemand in Preferences.ini; watch RSS on
+    song select vs gameplay; compare with the default (LowResPreload).
+ 
+4e. Lua GetNoteAnnotations and theme use [CODE]
+  - Binding Steps:GetNoteAnnotations() (Steps.cpp ~1186; documented
+    ~6337 with "PlayerNumber pn") IGNORES its argument and always uses
+    PLAYER_1 (C++ says annotations do not support couples/routine yet).
+    Docs/binding mismatch: observation. A commit message says the Lua method
+    was added in a5c166ba26.
+  - No theme use: 0 hits for "NoteAnnotation" in _fallback and Simply Love
+    dd06138. So the by-value loop (4b) is not triggered by shipped themes
+    [INFERRED].
+ 
+4f. Per-song timing and background-change data [CODE unless noted]
+  - Cache files start with WriteGlobalTags(): song timing tags, #BGCHANGES /
+    #FGCHANGES (NotesWriterSSC.cpp ~328-361, ~572-610), then cache tags, then
+    per-chart tags (no note data).
+  - Loading from cache (NotesLoaderSSC.cpp ~1044-1060): the BGCHANGES handler
+    is NOT gated by from_cache, so background/foreground changes are kept for
+    every song. Song::m_SongTiming and each Steps::m_Timing stay resident; a
+    chart's timing is filled only if it has its own timing tags.
+  - TimingData (TimingData.h): one vector<TimingSegment*> per segment type
+    (heap segments) plus two mutable lookup tables m_beat_start_lookup and
+    m_time_start_lookup, built by EnsureLookups() on first beat<->time query
+    with (bpm+warp+stop+delay segments + 1) entries each; cleared only by
+    InvalidateLookups() on edit. Nothing clears them on Compress or Cleanup.
+  - Size [INFERRED arithmetic]: ~40 B per entry (reconstructed lookup_item_t/
+    GetBeatStarts, compiled with g++ x86-64: 36 + 40); two tables x (N events
+    + 1) x 40 B, e.g. N=100 = ~8 KB per timing object, plus segments.
+  - WHEN tables exist: a cached load builds NONE; a parsed load builds them at
+    once; later lazily. See 7q. Library-wide magnitude: NOT measured.
+ 
+4g. Measuring startup time / RSS here: not feasible [checked 2026-09-29]: 1
+  CPU, ~3 GB RAM, ~9 GB disk, no cmake/clang, extern/ submodules (ffmpeg,
+  aubio, ...) empty after clone, no real display/GL. Use the in-game
+  procedure in 4d.
+ 
+ 
+5. CONCEPTS WORTH REMEMBERING
+-----------------------------
+- "Group" in code == "pack" to users. "Section" wheel rows are groups;
+  "ParentSection" rows are series.
+- GetDirListing(path, out, bOnlyDirs, bReturnPathToo): path is a pattern.
+- Pack.ini keys are parsed only when [Group] Version is non-empty.
+- ITGmania additions vs StepMania: Pack.ini/Group, sync-offset ITG/NULL
+  handling, note annotations/tech counts in caches, threaded song loading,
+  USB custom songs with Pack.ini (PR #1072).
+ 
+ 
+5b. BETA BRANCH SURVEY (first made at 28e58a78c7, 78 commits; now 84 over v1.3.0)
+--------------------------------------------------------------------------------
+[CODE: git log v1.3.0..beta; docs check = grep of Docs/ on beta. Subjects
+ first; behavior was then read per item as listed.] Version string 1.4.0
+ (e2fcbf4155). Docs/ on beta differs from v1.3.0 only in Luadoc/Lua.xml and
+ LuaDocumentation.xml. Candidates and where they are written up:
+  - Editor (Crash Cringle, Aug-Sep 2026): waveform, Adjust Sync (editor
+    notes); clipboard, undo/redo, mouse wheel/zoom, mouse drag (clipboard/
+    mouse notes). No docs for any.
+  - Input: "|" alternate codes (a657f14ed7); close-folder fallback
+    "@MenuDown-MenuUp" (ed19477cc6, edd3860083) (input notes, 7b);
+    "show one in row" (eefb37e388) (misc notes 3, 7i).
+  - Pad sensors (din): PadSensor Lua classes (documented), SnekConfig and
+    PumpHID sensor data (undocumented) (padsensor notes, 7c).
+  - Lights: BrokeIO driver (9529b84834) (misc notes 2, 7e).
+  - Series: series notes 12 (05507f6b40, 200c304220, SortOrder reorder, 7r).
+  - Other: WASAPI default on Windows (2ae7bf08ce) (misc 1); websocket
+    deflate (2714ea8ada) (misc 4, 7j); noteskins (default pump couples,
+    renamed variants); tech counts / note annotations / per-player column cues
+    for couples and routines (9c2038c41b, cd391a4546); memory-card and
+    profile fixes (Tater, sjrc6); NSIS installer rework (sukibaby);
+    TestLightEvent in ScreenTestLights (3e79f521a8). The last group has NOT
+    been read beyond subjects. Commits after 28e58a78c7: 7t.
+ 
+ 
+6. OPEN QUESTIONS / TO-DO (numbering kept; others cite "section 6 item 7")
+--------------------------------------------------------------------------
+  0, 1, 2, 3, 3a, 5, 6, 7, 9: DONE (see 4d, 3a, series notes 12, 5b, 4e,
+     4f/7q, the companion files, 7f).
+  4. DECIDED not feasible here (4g).
+  8. OPEN: second stage, turn notes into user-oriented docs.
+  10. Code-checkable leftovers. STILL OPEN: cache-file pruning (orphaned
+     cache files for renamed folders); SeriesBanner wildcard and Pack.ini
+     filename case; "~"/"!" input prefixes; OptionsList input path;
+     ScreenEdit Ctrl+K course branch; Alter-menu bSaveUndo for cut;
+     edit-screen clickable elements vs mouse drag; engine mixer resampling;
+     hidapi permissions on Windows/macOS; use of Pack.ini Year; theme
+     wheel-row images; the 20 IXWebSocket commits (v11.4.6 -> v12.0.1);
+     PR #1447 vs beta 05507f6b40 (same change?); noteskin/couples/annotation
+     commits (5b "Other"); release-note mention of the profile Priority
+     order change (7t item 5). Web/git only: BrokeIO dance mapping intent;
+     upstream docs for "|"; repo-wide licensing.
+     DONE: 7k, 7l (Adjust Sync target timing, INI duplicate keys, SongID::
+     ToSong/last song/courses for skipped packs), 7o, 7p, 7q, 7r, 7s, 7t, 7u,
+     PR #1488 close reason (7s).
+     Suggested next picks: user retest of duplicate DisabledSongs lines (7l);
+     then the open items above.
+  11. PARTLY DONE (7n, 7v): user built and tested the fork; results for
+     the first 11 test questions are in 7v / sketch Part I. STILL needs user:
+     sketch Part I3 items 12-23 (Series with one pack hidden/skipped, per-song
+     disable surviving a pack toggle, song-toggle save while skipped,
+     malformed DisabledGroups, same-name packs in extra folders, Reload Songs
+     vs startup time, duplicate DisabledSongs lines, last-played song and
+     fixed-song courses with skipped packs, all-skipped/all-hidden, title-menu
+     count); hardware checks.
+  12. Simply Love song-search shortcut (7m): PARTLY DONE: user confirmed F
+     opens the search and it works (7v). STILL needs user: Part I3 items
+     27-36 (the rest of the 7m checks).
+  13. PARKED: Reload Songs clears the saved P1 profile (7v). Fix idea only;
+     the user declined a patch for now and wants it kept for later.
+ 
+ 
+7b. INPUT CODES (2026-09-30) - itgmania_input_notes.txt
+  - "|" = alternate patterns; a failed alternative is dropped silently (Load
+    fails only if all fail). Works in CodeDetector metrics and
+    InputQueueCodeSet ([Screen] CodeNames/Code<Name>).
+  - Fallback CloseCurrentFolder on beta: dance "Up-Down|@MenuDown-MenuUp",
+    pump "@UpLeft-@UpRight-Center|@MenuDown-MenuUp".
+  - DetectCodes now tests EnteredCloseFolder before Prev/NextSteps; matters
+    for Simply Love (PrevSteps2="MenuUp").
+  - No consumers of Prev/NextOptionsList codes in src; no clash found.
+ 
+7c. PAD SENSOR / SNEKCONFIG (2026-09-30) - itgmania_padsensor_notes.txt
+  - Lua API documented (GetFullSensorState, StartSensorTest/StopSensorTest);
+    the drivers (SnekConfig, PumpHID sensor data) and enabling via the
+    InputDrivers pref are not. Neither is in the default lists (Windows,
+    macOS, Linux X11/LinuxEvent/LinuxJoystick). InputDrivers REPLACES the
+    defaults; names case-insensitive.
+  - Both drivers write binary values only; corner sensors never set.
+  - SnekConfig polls only during the sensor test; a code comment says gamepad
+    events pause on the board meanwhile (hardware behavior UNVERIFIED).
+  - Observations: no lock on the sensor table; tight retry loop with device
+    re-enumeration on a failed snek command; HidDevice::GetDeviceInfo never
+    frees the hid_enumerate list (also in v1.3.0). No theme uses the data.
+ 
+7d. EDITOR CLIPBOARD / UNDO / MOUSE (2026-09-30) -
+    itgmania_editor_clipboard_mouse_notes.txt
+  - Beta: Ctrl+Z/U undo, Ctrl+Y redo (50-level stacks, NOTE DATA ONLY; timing
+    is not undoable), Ctrl+X/C/V clipboard (Shift adds timing; clipboard is
+    static, persists across charts in one run). v1.3.0: one undo level, "U".
+  - Wheel = line scroll, Shift = page, Ctrl = scroll-speed presets; metrics
+    ScrollWheelAccelerationRate, ScrollSpeedApproachRate, ScrollSpeedPresets.
+    Mouse drag = area selection (Shift = snap to grid).
+  - Observation: the scroll-acceleration multiplier resets only on the next
+    wheel event, so keyboard line scroll may stay accelerated after a burst.
+ 
+7e. MISC BETA ITEMS (2026-09-30) - itgmania_misc_notes.txt
+  - WASAPI default: only a reorder in arch_default.h (driver is in v1.3.0 as
+    selectable). Shared mode, default endpoint only, mix format must be
+    float/16-bit else falls back to DirectSound-sw. SoundDrivers entries are
+    validated case-sensitively against the default list. No device-change
+    handling. No docs.
+  - BrokeIO lights: 17-byte HID report, on/off only; LightsDriver pref
+    REPLACES the default "SystemMessage,Export"; odd dance mapping (Up/Down/
+    Left/Right -> UL/UR/CN/LL); stale bytes and no retry after a failed write.
+ 
+7f. PACK / SONG TOGGLE IDEA (2026-09-30, v1.3.0 8a3bf8884a)
+  [CODE unless noted; TESTED = user-run.] Design and patch details live in
+  itgmania_pack_toggle_sketch.txt (Parts A-H); this entry keeps the facts
+  found while framing the idea.
+  Idea (user): let players toggle packs and/or songs so they truly do not
+  appear (manageable menus, large libraries, performance).
+  Underscore myth: a leading "_" does NOT hide a pack [CODE: only
+  StripMacResourceForks (names starting "._") and StripCvsAndSvn (names ending
+  CVS, .svn, .hg) filter folders in LoadSongDir]. TESTED: "_Pack" loads
+  normally (sorts last, SongUtil::MakeSortString); "._Pack" disappears, only
+  as a side effect of the macOS filter; it drops the folder before any song
+  loading, so it should save load time [INFERRED; library too small to
+  measure].
+  Crash/empty-data worry: not found in ITGmania. No persistent pack database;
+  the cache is keyed by path (SongCacheIndex.cpp header comment), so a renamed
+  folder is a new path. Pruning of orphaned cache files not found
+  [UNVERIFIED]. Worry probably from StepMania 5 / Project Outfox; dropped.
+  Existing per-song disable:
+    - Song::m_bEnabled -> UnlockManager::SongIsLocked returns LOCKED_DISABLED
+      -> MusicWheel drops it in BuildWheelItemDatas (~505) and
+      FilterWheelItemDatas (~1341). Persisted in pref "DisabledSongs"
+      (g_sDisabledSongs; SaveEnabledSongsToPref / LoadEnabledSongsFromPref).
+      TESTED: a DisabledSongs entry hides the song.
+    - SYNTAX [CODE: SongManager.cpp split/join on ";"; SongUtil.cpp SongID;
+      GetSongFromDir]: ONE preference line, entries separated by ";", each the
+      song folder path, e.g.
+        DisabledSongs=Songs/PackA/SongOne/;Songs/PackA/SongTwo/
+      Matching is lenient: case-insensitive, "\" = "/", trailing and leading
+      "/" optional; entries matching no loaded song are ignored; a folder name
+      containing ";" cannot be listed. Edit Preferences.ini with the game
+      CLOSED (it is rewritten on exit). SaveEnabledSongsToPref rewrites the
+      value from loaded songs (drops unloaded ones) and is called only from
+      the toggle screen.
+    - REPEATED KEYS: TESTED 2026-09-30: with several DisabledSongs lines only
+      the FIRST took effect and the others were deleted. The code says the
+      LAST should win (7l). UNRESOLVED; use the single-line form.
+    - UI: ScreenOptionsToggleSongs (groups) and ...SubPage (songs, On/Off)
+      exist in src and save on each change, but nothing reaches them: no
+      reference in _fallback or Simply Love dd06138, and they cannot be opened
+      as-is because ScreenManager::MakeNewScreen needs a [<Screen>] Class
+      metric (sketch A9). Only doc mention: Changelog_sm-ssc.txt ~198-201.
+    - Lua: Song:IsEnabled() only (no SetEnabled at v1.3.0). No pack-level
+      disable. #SELECTABLE:NO hides a song only with pref HiddenSongs on.
+  Limits [INFERRED from call order]: LoadEnabledSongsFromPref runs in
+    InitSongsFromDisk AFTER LoadSongDir (~280), so disabled songs are still
+    parsed/cache-loaded and keep resident chart, timing and banner-cache
+    data: hides rows only, no startup or memory saving. TESTED: listing every
+    song of one pack in one DisabledSongs line hides the whole pack row.
+  Options evaluated: A engine (hide via DisabledGroups + skip in LoadSongDir;
+    best = both; reload via Reload(false) = FreeSongs + full InitAll, see
+    sketch A1), B Simply Love only (needs engine Lua setters), C standalone
+    tool editing DisabledSongs or renaming to "._" (no live toggle, cache
+    invalidated). Recommendation: A, with B as the UI layer.
+ 
+7g. PACK TOGGLE PATCH (2026-09-30) - sketch Part F
+  itgmania_pack_toggle_v1_3_0.patch against v1.3.0 (6 files, +121): pref
+  DisabledGroups (";"-separated pack folder names, case-insensitive), live
+  hide via SongIsLocked, skip in LoadSongDir, Lua SONGMAN:SetGroupEnabled/
+  IsGroupEnabled/SaveEnabledSongs, Group:IsEnabled, Song:SetEnabled
+  (documented "since ITGmania 1.4.0"). g++ -fsyntax-only OK on 4 files.
+  CORRECTION 2026-10-01: Reload(false) turns FastLoad off, which only adds a
+  cache-validity check (directory hash of per-file mtime+size); valid cache
+  files are still used (sketch A1). Time "Reload Songs" in game [UNVERIFIED].
+ 
+7h. PACK TOGGLE UI PATCH (2026-10-01) - sketch Part G
+  itgmania_pack_toggle_ui_v1_3_0.patch (apply after the first) +
+  sl_toggle_songs.patch (Simply Love text edits; manual version:
+  sl_toggle_songs_manual_edits.txt). Syntax-checked only at writing; built and
+  field-tested later (7n). User plan: GitHub fork build (Windows 11):
+  fork, enable Actions, git apply both engine patches, push to the fork's
+  `release` branch, download the Windows installer artifact (ClubFantastic
+  Off); SL edits go in the installed theme folder.
+ 
+7i. "SHOW ONE IN ROW" (2026-10-01) - misc notes section 3
+  - eefb37e388 (beta): in arcade-style toggle menus (NAV_TOGGLE_THREE_KEY:
+    theme NavigationMode="toggle" + ArcadeOptionsNavigation non-zero),
+    ShowOneInRow SELECT_ONE rows get a persistent down arrow (text item 0) plus
+    the value. Left/Right from the arrow first only moves focus; then they
+    change AND select at once; Start returns to the arrow.
+  - Side effect: ChangeValueInRowAbsolute (unused in v1.3.0) now carries the
+    logic, so the "ChangeValue" message fires on every value change (never
+    from input in v1.3.0). No shipped theme listens. No opt-in flag; no row
+    found that was moved because of it. No docs. Simply Love uses "toggle" on
+    PlayerOptions2/3 and AttackMenu; no collision found (7k).
+ 
+7j. WEBSOCKET PER-MESSAGE DEFLATE (2026-10-01) - misc notes section 4
+  - 2714ea8ada (beta, 2026-07-18): Lua field enableDeflate on
+    NETWORK:WebSocket{}; absent = TRUE. At v1.3.0 compression was never
+    requested (IXWebSocket default is off), so on beta the default silently
+    changes to ON; workaround enableDeflate=false.
+  - Client sends "Sec-WebSocket-Extensions: permessage-deflate;
+    server_max_window_bits=15; client_max_window_bits=15". A server without
+    it: no effect. Server accepts but zlib init fails: the handshake fails
+    (no fallback).
+  - Not in the Lua docs. Simply Love dd06138 opens two sockets (GrooveStats QR
+    login, online lobby) with no field set, so both ask for deflate on beta;
+    server support UNVERIFIED. IXWebSocket bumped v11.4.6 -> v12.0.1 (181461057a);
+    its 20 commits not reviewed.
+ 
+7k. CODE-CHECK ROUND (2026-10-01) [CODE; details in the files named]
+  - BETA HEAD MOVED 28e58a78c7 -> c8e69b9ca8; 5 new commits (read in 7t).
+  - Simply Love vs the "show one in row" arrow item: no collision (SL's
+    index-based reads of option-row text items are only on ScreenPlayerOptions
+    rows Mini/SpeedMod/NoteSkinVariant, which uses "normal" navigation).
+  - Pad sensor: Lua player keys "P1"/"P2"; no lock on the sensor table; snek
+    poll loop on failure is tight (re-enumeration + two warnings per pass);
+    HidDevice::GetDeviceInfo leaks the enumerate list (v1.3.0 too).
+  - Pack toggle (sketch Part H): reader audit done; both engine patches and
+    the SL patch apply cleanly to beta c8e69b9ca8 / SL dd06138 (git apply
+    --check; NOT compiled on beta). Findings: Branches.lua uses
+    SONGMAN:GetNumSongs()==0 -> ScreenHowToInstallSongs and hide-only does not
+    change that count; EditMode_Full ignores the disabled flag; bookkeeping
+    deliberately still counts disabled songs.
+ 
+7l. CODE-CHECK ROUND 2 (2026-10-02) [CODE]
+  - ADJUST SYNC TARGET TIMING (ScreenEdit.cpp ~5626-5642): decided by
+    GAMESTATE->m_bIsUsingStepTiming (editor timing mode), not by whether the
+    chart has own timing. Mode true + chart has no own timing -> song timing is
+    COPIED into the chart and the result applied there (chart becomes
+    split-timing; song timing unchanged). Mode false -> song timing. The mode
+    starts true only if the chart already has own timing; reset to true on
+    leaving the editor (editor notes Part 2 s.2).
+  - INI DUPLICATE KEYS (IniFile.cpp ReadFile ~34-112, XmlFile.cpp AppendAttr
+    ~196-204, XmlFile.h XAttrs = std::map, PrefsManager.cpp ReadPrefsFromFile
+    ~462): a repeated key within one section overwrites the earlier value, so
+    the LAST line wins; key names case-sensitive; repeated section names merge;
+    lines starting ';', '#', '//' or '--' are comments; a line without '='
+    only logs a warning.
+    DISCREPANCY with the user's test (first line won): possible reasons
+    [INFERRED, none confirmed]: lines not in the remembered order; a
+    different file or section held one (Preferences.ini [Options] is read after
+    Defaults.ini, before Static.ini); Static.ini or Defaults.ini also sets it.
+    NEEDS USER RETEST: game closed, put DisabledSongs=<songA> then
+    DisabledSongs=<songB> in [Options], start, note which is hidden.
+  - SKIPPED PACKS AND SAVED STATE: SongID::ToSong returns null for unloaded
+    songs (GetSongFromDir = lookup in m_SongsByDir); MusicWheel::SelectSong
+    returns false for null or for a song not on the wheel, so selection falls
+    to the current song, courses, then the first selectable item; profile
+    m_lastSong is not overwritten until another song is chosen (GameState.cpp
+    ~941); Profile:GetLastPlayedSong() returns nil (themes must handle it);
+    fixed #SONG course entries into a skipped pack are dropped with a log
+    message and the course is marked incomplete (shown unless
+    HideIncompleteCourses, default false). Edge: SORT_PREFERRED/SORT_METER with
+    a remembered open section can return true from SelectSong without
+    selecting the song (observation, not run). Hide-only vs fixed-song
+    courses: not read [UNVERIFIED].
+  - Not done that round: the other A-list items (now tracked in section 6).
+ 
+ 
+7m. SL SONG-SEARCH KEYBOARD SHORTCUT (2026-10-02) - sl_song_search_shortcut.patch
+  Question: add a keyboard shortcut (user suggested Ctrl+F) on Simply Love's
+  song select for the song search, otherwise reached via SortMenu >
+  "WhereforeArtThou". Bases: engine v1.3.0 and beta (ScreenSelectMusic.cpp
+  diff = DetectCodes only), Simply Love dd06138. Not run by me. [CODE unless
+  noted]
+  - CTRL+LETTER IS TAKEN BY THE ENGINE (ScreenSelectMusic.cpp ~494-540):
+    Ctrl+A..Z jumps to that letter, sets sort to Title (Artist stays Artist),
+    writes m_PreferredSortOrder, then ChangeSort/SetOpenSection/SelectSection.
+    Ctrl+Shift+R reloads the selected song (checked first); Ctrl+Backspace
+    deletes a song when AllowSongDeletion.
+  - ORDER: ScreenManager::Input (~562-565) calls the top screen's Input, THEN
+    PassInputToLua, regardless of the return value, so a Lua callback cannot
+    pre-empt the engine handler. set_input_redirected is per PlayerNumber and
+    PlayerNumber is filled only for keys mapped to a game button
+    (StepMania.cpp ~1360), so it cannot suppress the engine for an unmapped
+    key [INFERRED: an unmapped key arrives with nil PlayerNumber; SL's own
+    handlers rely on it].
+  - TESTED by user: Ctrl+F and Ctrl+Shift+F both jump to F and switch to
+    Title; the Title sort persists after visiting the song-select settings
+    menu; Alt+F and plain F do nothing.
+  - PLAIN F IS FREE: no engine file except input drivers and the key enum
+    references KEY_Cf; GameManager.cpp keyboard auto-maps use q,w,e,r,t,y,u,i,
+    a,d,s,x,z,c; debug overlay letters stop at Q-P, A, S, D; SL has no
+    DeviceButton_f binding. A player can still map F in the key mapping screen.
+  - HOW THE PATCH WORKS (3 files: new SongSearch/ShortcutHandler.lua, one
+    LoadActor line in ScreenSelectMusic overlay/default.lua, en.ini text for
+    KeyboardFeatures): an input callback added in OnCommand only if theme pref
+    KeyboardFeatures is on. On FirstPress of DeviceButton_f it queues SortMenu's
+    existing DirectInputToEngineForSongSearch command. Guards: no modifier held
+    (tracked from events; no Lua key-state API); event PlayerNumber nil; no
+    player input redirected (every overlay redirects); top screen is
+    ScreenSelectMusic; not transitioning; not course mode; wheel not locked.
+    Calls wheel:Move(0) first (the key release goes to the text entry)
+    [INFERRED]. Checked here: Lua syntax, a mock-based logic test in embedded
+    Lua 5.4, git apply --check on a fresh dd06138. NOT run in the game.
+  - Typing "f" in the box does not re-trigger (only ScreenTextEntry gets input;
+    it types on FirstPress, so the opening F is not typed) [INFERRED].
+  - LIMITS [INFERRED]: modifier state comes from events this callback saw; a
+    stale flag ignores F until that modifier is pressed and released once.
+    Ctrl held before load plus F would run the engine jump and the search.
+    Key identified by position code; non-US layouts UNVERIFIED. Only
+    ScreenSelectMusic (the Casual screen is not touched).
+  - OBSERVATION: SortMenu/default.lua loads SongSearch/SongSearchSettings.lua
+    (line 16) then defines a second local SongSearchSettings (~line 60) that
+    shadows it, so edits to the file would not change the sort-menu search.
+  - Engine alternatives not done: (a) opt-out of Ctrl+letter jump (needs an
+    engine change; SL pins an engine commit); (b) Lua undoing the jump.
+  - USER CHECKS (KeyboardFeatures on): F on song select opens the box and
+    stops a held wheel direction; type, OK: results; Back: closes. F with sort
+    menu / results / test input open: nothing. Ctrl+F still jumps, no box.
+    Course mode: nothing. Pref off: nothing. F again works after closing. F
+    mapped to a pad button: no search.
+ 
+7n. USER TEST OF TOGGLE UI + WHEEL TIMING + CLANG FIX (2026-10-02, user-reported)
+  Build: GitHub Actions fork build with itgmania_pack_toggle_ui_v1_3_0.patch,
+  wheel-timing-log.patch and itgmania_clang_format_fix.patch added to the
+  earlier toggle patch. No compile errors (the earlier clang-format failure is
+  gone); the exe runs. Packs switch On/Off in the in-game GUI; the change shows
+  on the next entry to song select, as predicted (sketch Part G). [TESTED]
+  Not reported: sl_toggle_songs.patch / operator-menu entry (unclear which
+  theme's screen was used); sl_song_search_shortcut.patch (not included).
+  WheelTiming log (LogWheelTimings=1), same library, a few scrolls/re-sorts
+  [TESTED; one session per state]:
+    state            songs groups  Series build   Series filter  Title build/filter
+    all packs on     3484   90     75.7, 51.3 ms  7.1, 5.7 ms    22.3 / 5.6 ms
+    large packs off  1808   75     61.8, 25.7,    2.9, 3.0,      not logged
+                                   28.0 ms        3.1 ms
+    Wheel Load (UpdatePopular + SortSongs): all on 29.3 + 24.8 ms first, 13.2 +
+    8.1 ms second; off 10.8 + 7.5, 7.1 + 3.6, 7.0 + 4.1 ms. Unfiltered Series
+    items 3576 vs 1885 (songs + section rows).
+  Reading [INFERRED from these numbers only]:
+    - Work scales roughly with song count: songs -48%, steady-state Series
+      build -50% (51 -> 26-28 ms), filter -45%. Matches 4a.
+    - The first build after launch is slower in both runs (75.7 vs 51.3 ms;
+      61.8 vs 25.7 ms), likely cold caches [UNVERIFIED]; compare steady state.
+    - Absolute cost is small (30-80 ms per Series build, a few ms to filter),
+      consistent with >120 FPS either way; the saving is at screen entry, not
+      per frame (per-frame wheel cost was not logged).
+    - n=1 per state; differences of a few ms are not meaningful.
+  Consequence: skip-at-load and hide-only both work in the field; a smaller
+  library saves real but modest wheel time on a fast PC.
+ 
+7o. TEMPODETECTOR / BPM FOLDING (2026-10-03, beta c8e69b9ca8) - editor notes Part 2 s.4b
+  Detector core compiled and run on synthetic click tracks (system libaubio
+  0.4.9; beta pins extern/aubio 152d6819b3, not checked out). [CODE unless
+  tagged]
+  - No folding code: 89-205 BPM only bounds the tested beat intervals; onset
+    periodicity makes T score also at T/2, 2T, 3T/2. TESTED synthetic:
+    60 -> 120, 70 -> 140, 90 -> 90 (400 s tracks); 210 -> 105, 240 -> 120,
+    300 -> 150 and 100 (90 s tracks).
+  - RemoveDuplicates (same as upstream ArrowVortex) deletes later entries
+    within 0.1 BPM of an earlier BPM, its double or its half: the TRUE tempo
+    can be removed when 2x outscores it; 1.5x/3x siblings and near-duplicates
+    survive.
+  - Run() down-weights only the first 100 onsets (mean |sample|; the rest stay
+    1.0); identical in upstream, commented out in one standalone port. On
+    short synthetic tracks it changed results (60 BPM -> no result; 90 -> 180);
+    on 400 s tracks it did not. Real songs untested; cause of the empty result
+    not traced.
+  - Upstream raw URLs that worked: raw.githubusercontent.com/uvcat7/
+    ArrowVortex/master/src/Editor/FindTempo.cpp and the StepMania-AMX copy.
+ 
+7p. LOAD ORDER ACROSS SONG DIRS (2026-10-03, v1.3.0; beta same) [CODE unless tagged]
+  - ONE LoadSongDir call: InitSongsFromDisk -> LoadSongDir(SpecialFiles::
+    SONGS_DIR) (SongManager.cpp:280). Extra folders are virtual-filesystem
+    mounts (StepMania.cpp ~826-835): AdditionalFolders ReadOnly/Writable at "/",
+    AdditionalSongFolders ReadOnly/Writable at "/Songs" (same for Courses),
+    then MountTreeOfZips(Packages). Deprecated AdditionalFolders /
+    AdditionalSongFolders prefs are copied to the Writable ones
+    (PrefsManager.cpp ~548-552). Saved song IDs starting "AdditionalSongs/" are
+    rewritten to "Songs/" (SongUtil.cpp ~1501).
+  - Listing: RageFileManager::GetDirListing asks every mount, then if more than
+    one returned entries, sorts and de-duplicates case-INsensitively. So a pack
+    folder in Songs/ and in an extra folder is ONE pack; its song folders are
+    the union; a song folder in both is ONE song. Names differing only in case
+    collapse; which spelling survives is unspecified (std::sort not stable)
+    [INFERRED].
+  - Read priority: AddFilesystemDriver inserts at the FRONT of g_pDrivers, so
+    the most recently mounted driver is asked first; Open, GetFileSizeInBytes
+    and GetFileHash take the first driver that has the file. Mount order: base
+    Songs dir, additional folders, additional song folders, Packages zips. Later
+    mounts win per FILE, not per folder [INFERRED consequence: a split pack can
+    take Pack.ini from one mount and the banner from another; zips outrank
+    loose files]. Not read: Mount() duplicate handling, zip mount points,
+    platform hooks.
+  - Load order: pack names go into std::map mapGroupSongDirs (byte order,
+    case-sensitive) regardless of mount (matches 3a). Songs per pack: merged
+    listing, SortRStringArray. Loading is parallel but the main thread consumes
+    results in index order, so AddSongToList and m_mapSongGroupIndex order is
+    deterministic. Group objects (Pack.ini via VFS) are created in the same
+    map loop.
+  - Consequence: no "earlier directory wins" rule; SeriesBanner resolution
+    depends only on merged pack folder names.
+  - Cache: song paths are "Songs/<pack>/<song>/" whatever the mount;
+    GetHashForDirectory hashes the merged listing with per-file hashes from the
+    first driver that has each file [CODE; not tested].
+  - Toggle patch: skip uses the merged pack name, so it hides the pack from
+    every mount; GetAllPackFolderNames lists GetDirListing("Songs/*"), also
+    merged, so extra-folder packs appear in the toggle UI [INFERRED].
+  - USB custom songs load in Profile::LoadSongsFromDir (Profile.cpp
+    ~1196-1250; needs CustomSongsEnable and a memory card) into Profile::
+    m_songs with their own Group, not via LoadSongDir.
+  - User checks: Log.txt "Loading songs using N threads" once per load. Put a
+    pack with the same folder name as one in Songs/ into a folder listed in
+    AdditionalSongFoldersWritable with a different Pack.ini: songs should
+    merge into one pack row; check which Pack.ini wins. Put the same song
+    folder in both: expect one entry.
+ 
+7q. CACHED-LOAD TIMING LOOKUP TABLES (2026-10-03; v1.3.0, beta same) [CODE unless tagged]
+  Resolves the open point in 4f. Not run; no memory measured.
+  - The tables (TimingData::m_beat_start_lookup / m_time_start_lookup) are
+    built only by EnsureLookups(), whose two callers are
+    GetBeatAndBPSFromElapsedTimeNoOffset (~798) and GetElapsedTimeFromBeatNoOffset
+    (~872), i.e. every beat<->time query; one query materializes both.
+    GetActualBPM, HasStops etc. and the C++ BPM display do not call it.
+  - CACHED LOAD BUILDS NONE. Song::LoadFromSongDir cached branch (Song.cpp
+    ~310-352): SSCLoader::LoadFromSimfile(from_cache=true), then
+    SMLoader::TidyUpData(song, true) -> Song::TidyUpData(true). There the timing
+    work is m_SongTiming.TidyUpData(false) and per chart Timing.TidyUpData(true);
+    TimingData::TidyUpData (~1046) only CLEARS lookups and fills default
+    segments. The queries in TidyUpData (sample start ~871-882) and
+    ReCalculateStepStatsAndLastSecond (~1134) are inside `if (!from_cache)`
+    (brace depth checked by script); the song-background GetLastBeat query is
+    skipped by `if (bFromCache) break`. Nothing after queries timing.
+  - PARSED (UNCACHED) LOAD BUILDS THEM at once: !from_cache TidyUpData calls
+    ReCalculateStepStatsAndLastSecond(true) (~1157-1195), which per chart runs
+    Steps::CalculateStepStats (radar, tech counts via StepParityGenerator,
+    measure info; uses GetElapsedTimeFromBeat) and queries
+    GetElapsedTimeFromBeatNoOffset for non-autogen, non-edit charts with notes.
+    Tables then persist until the song is freed or its timing edited
+    (InvalidateLookups callers: Clear/Copy, AddSegment, ShiftRange, ClearRange,
+    MultiplyBPMInBeatRange, ScaleRegion, InsertRows, DeleteRows, TidyUpData);
+    nothing in Steps::Compress or SongManager::Cleanup clears them [INFERRED
+    from the two-caller rule].
+  - Which object: Steps::GetTimingData() returns the song timing when the
+    chart's own m_Timing is empty (Steps.cpp ~669), so most queries land on
+    Song::m_SongTiming; a separate table exists only for charts with own timing.
+  - Copies carry no tables: the TimingData copy ctor/operator= call Copy(),
+    which re-adds segments via AddSegment (empty lookups). Autogen charts
+    (Steps::AutogenFrom) and GameSoundManager::PlayMusic (copies the timing it
+    is given, ~712; ScreenSelectMusic passes &pSong->m_SongTiming ~1864, ~1895)
+    build separate, short-lived tables.
+  - Later (lazy) builders: gameplay/editor code (Player, SongPosition,
+    ScreenGameplay, Background/Foreground via Song::GetFirstBeat/GetLastBeat,
+    NoteField, ArrowEffects, ScreenEdit, GameState::GetSongPercent); no direct
+    timing query in ScreenSelectMusic or MusicWheel. Lua: TimingData:
+    GetBeatFromElapsedTime / GetElapsedTimeFromBeat, Song:GetFirstBeat /
+    GetLastBeat. Simply Love dd06138: Scripts/SL-Histogram.lua gen_vertices
+    calls Steps:GetTimingData():GetElapsedTimeFromBeat(0) and one query per
+    measure; NPS_Histogram is used on ScreenSelectMusic (overlay/PerPlayer/
+    DensityGraph.lua), gameplay, evaluation and practice; the song-select
+    graph's RedrawCommand is chained with the original (02 ActorDef.lua
+    MergeTables) [CODE; INFERRED that highlighting a song builds its timing
+    tables once chart data is parsed; whether a hidden graph still redraws
+    was not read]. metrics.ini ~2142 ([Background] RandomBGStartBeat) calls
+    Song:GetFirstBeat when the Background is built (gameplay). So in SL the
+    song timing of each HIGHLIGHTED song gets tables; the library as a whole
+    does not.
+  - Beta: TimingData.cpp/.h and GameSoundManager.cpp byte-identical to v1.3.0;
+    NotesLoaderSM.cpp and ScreenSelectMusic.cpp timing use unchanged; Song.cpp
+    differs only in image-cache code (7s); Steps.cpp in couples/annotation code;
+    NotesLoaderSSC.cpp grep-only (no timing/cache terms in the diff).
+  - Size per timing object: as 4f. Resident tables scale with songs parsed in
+    this run plus songs highlighted or played, not with library size on a
+    cached start. Not measured.
+  - Optional user check: compare RSS at the title screen after (a) a startup
+    with all songs cache-valid and (b) a startup right after deleting
+    Cache/Songs; the difference includes tables AND parsed chart data (upper
+    bound).
+ 
+7r. SERIES RE-DIFF ON BETA + SORTORDER REORDER (2026-10-03, beta e4b4bf0755) - series notes 12h
+  - BETA HEAD MOVED c8e69b9ca8 -> e4b4bf0755 (84 commits over v1.3.0). The one
+    new commit is the video decoding refactor (7u). Series files: Group.cpp/.h
+    identical to v1.3.0; SongManager.cpp/.h only GetGroupsInSeries;
+    MusicWheel.cpp only the single-pack rule; ScreenSelectMusic.cpp only the
+    DetectCodes reorder; fallback metrics no series lines; Simply Love pin still
+    dd06138.
+  - SORTORDER: enum reordered on beta (Series to position 1; Recent*, Length
+    into the song-sort block; commits dbe09dffb6, b1a53c70e8, df4aaa8aeb).
+    Profiles store the sort by string name (Profile.cpp ~1598, ~1811), so saved
+    data is safe. Lua docs match the C++ array (33/33, scripted). IsSongSort is
+    now a range test (>= SORT_PREFERRED && <= SORT_DOUBLE_CHALLENGE_METER) that
+    includes Series, Recent, RecentP1/P2 and Length, so Recent sorts are newly
+    remembered as the preferred/profile sort [INFERRED; two call sites,
+    MusicWheel.cpp ~1616, GameState.cpp ~929].
+  - Still open: third-party themes using numeric enum values (none in
+    _fallback or SL dd06138).
+ 
+7s. IMAGE-CACHE RE-CHECK ON BETA + PR #1488 CLOSE REASON (2026-10-03)
+  [CODE unless tagged]
+  - Scope: `git diff --stat v1.3.0 beta` shows no change in ImageCache.cpp/.h,
+    Banner.cpp/.h, EditMenu.cpp, PrefsManager.cpp; ScreenSelectMusic.cpp differs
+    only in DetectCodes; only Song.cpp differs, by 4101049b92 (Arthur Eubanks,
+    2026-09-30, "Some image cache loading cleanups", +23/-65).
+  - 4c/4d STILL HOLD ON BETA: default LOW_RES_PRELOAD (PrefsManager.cpp:186);
+    Demand/Undemand and the refcount byte-identical; same four callers; Demand
+    still passes one dir name (4d a); the cached-load guard (~450) and the
+    unguarded TidyUpData call (~727, !from_cache only) unchanged apart from
+    `const std::string&` loop variables (4d b).
+  - What 4101049b92 changes: (a) Song::GetCacheFile(type): v1.3.0 built a map of
+    six predefined paths per call and tested `if (PreDefs[...].c_str())`,
+    always true, so the directory-scan fallback below it was unreachable
+    [CODE; INFERRED no case reaches it]; beta uses an if-chain over the same six
+    getters (Banner, Background, CDTitle, Jacket, CDImage, Disc); unknown type
+    returns "". (b) Song::GetSongAssetPath: the DoesFileExist check now comes
+    AFTER the "no '/' in the name" shortcut; same results, one fewer existence
+    check for plain file names (also backs GetMusicPath, GetBannerPath etc.;
+    callers not enumerated; saving not measured). (c) two by-value ImageDir
+    loops became const references.
+  - PR #1488 (series notes 12c): closed 2026-09-09 by its author after teejusb
+    pointed to #1447 as already fixing it; author could not reproduce on a
+    rebuilt branch [WEB, page fetched]. Link between #1447 and 05507f6b40 not
+    checked [UNVERIFIED].
+ 
+7t. THE SIX COMMITS AFTER 28e58a78c7 (2026-10-03) [CODE unless tagged; not built or run]
+  1. e9ba1e1526 (Eubanks, 2026-09-26) "Remove dead build options and
+     backends": 15 files, +15/-1494. Removes RageDisplay_GLES2, RageSoundDriver_OSS,
+     FindOSS.cmake, CMake options WITH_GLES2/WITH_X11/WITH_XRANDR and the
+     HAS_X11/HAS_XRANDR/HAS_OSS/HAS_GTK3 variables, an X11 clipboard block in
+     ArchHooks_Unix.cpp, and a `#ifndef HAVE_X11` guard around glewInit.
+     - Default builds behave the same: the removed items were never compiled in
+       (commit message: SUPPORT_GLES2, WITH_OSS, HAVE_X11 never defined by
+       CMake; no source still tests HAVE_X11/HAVE_XRANDR/HAS_*; HAVE_GTK is
+       still set from GTK3_FOUND).
+     - Linux builds now ALWAYS require X11 and Xrandr; WITH_X11=OFF /
+       WITH_XRANDR=OFF no longer exist (only a custom -DWITH_X11=OFF build
+       changes; the message says those could not work). glewInit() is now
+       unconditional (same as before).
+     - ArchHooks_Unix::GetClipboard: the X11 version was dead; the function still
+       logs "Compiled without any supported clipboard source" and returns "".
+       Only caller: ScreenTextEntry.cpp:254 (paste into a text box), so on Linux
+       paste gives an empty string and a Warn log, as in v1.3.0.
+     - VideoRenderers defaults: "opengl" (Linux), "opengl,d3d" (Windows)
+       (StepMania.cpp ~402, 412). The "gles2" branch in CreateDisplay is gone: a
+       hand-edited "gles2" used to be SKIPPED (the branch never created a
+       display); on beta any unknown name makes CreateDisplay throw
+       ERROR_UNKNOWN_VIDEO_RENDERER (fatal) [CODE for the throw; INFERRED for
+       the old skip].
+     - Sound: "OSS" removed from the Linux default list; a user SoundDrivers
+       entry "OSS" is now removed with a Warn log and a user-facing warning
+       (RageSoundDriver.cpp ~39-57); it was never a working driver
+       [INFERRED: not built]. Docs: only historic Changelog_sm5.txt lines.
+  2. beed677537 (Brandon W, 2026-09-28) "Expose unix time to lua": global
+     GetUnixTime() = static_cast<double>(time(nullptr)) (DateTime.cpp);
+     documented in LuaDocumentation.xml and Lua.xml ("since ITGmania 1.4.0").
+     Doc says return int; the registered value is a Lua number (double), exact
+     for current timestamps. UTC-based by definition of time().
+  3. 7d3bd3a83c (Eubanks, 2026-09-30) "Don't split *PERMEASURE":
+     NPSPERMEASURE / NOTESPERMEASURE cache-tag parsing (NotesLoaderSSC.cpp) scans
+     for commas in place instead of split() + string vectors. Commit message
+     claims ~6% fewer CPU cycles on warm-cache startup (author's figure, not
+     verified). Floats identical to before (strtof + isfinite else 0). Ints: old
+     std::stoi logged a Warn and returned 0 on a non-number or out-of-range
+     value; new (int)strtol gives 0 with NO log line for a non-number, and a
+     clamped long cast to int for out-of-range (64-bit-long platforms: 4294967296
+     -> 0, 2147483648 -> -2147483648; Windows 32-bit long clamps to INT_MAX)
+     [INFERRED from strtol/cast rules; not run]. Only corrupt cache values reach
+     this. Empty segments skipped in both.
+  4. 4101049b92 image-cache cleanup: see 7s.
+  5. c8e69b9ca8 (Eubanks, 2026-10-01) "Cleanup profile loading/sorting code"
+     (ProfileManager.cpp +46/-215): the four LoadLocalProfilesBy{Priority,Name,
+     Recent,CreationTime} are one template LoadLocalProfiles(compare).
+     [CODE; consequences INFERRED, not run]
+     a) PRIORITY ORDER NOW ACTUALLY APPLIED. In v1.3.0 the priority insertion
+        loop iterated g_vLocalProfile, which is empty at that point
+        (UnloadAllLocalProfiles clears it; add_category_to_global_list runs
+        after), so it never executed and profiles stayed in directory-listing
+        order within each type (code from b43af6dce9, 2014). Beta stable-sorts
+        each type by Type.ini Priority; Priority is the default sort (pref
+        ProfileSortOrder). After updating, a machine whose saved priorities
+        differ from folder order may see the profile list reorder; in v1.3.0 a
+        "move up/down" in Manage Profiles (MoveProfilePriority) would not
+        survive a restart.
+     b) Priority now also obeys ProfileSortOrderAscending (default true); with
+        "No" priority order is reversed on load while MoveProfilePriority and
+        InsertProfileIntoList still assume ascending numbers (observation).
+     c) std::sort -> std::stable_sort: equal names/dates keep directory order.
+     d) LoadEditableDataFromDir is called for every sort mode (v1.3.0: only
+        Alphabetical): one small extra file read per profile in other modes.
+     e) Ascending/descending meaning for Recent and CreationTime and Name is
+        unchanged (checked line by line).
+     f) Array indexing by m_Type is safe (invalid type strings map to Normal;
+        a missing Type.ini leaves Normal).
+  6. e4b4bf0755 video decoding refactor: see 7u.
+  Open points: release-note mention of 5a; in-game checks: (i) reorder profiles
+  in Manage Profiles on v1.3.0, restart, see whether the order sticks, then
+  repeat on beta; (ii) Linux: VideoRenderers=gles2 should now abort start with
+  an unknown-renderer error.
+ 
+7u. VIDEO DECODING REFACTOR e4b4bf0755 (2026-10-04) [CODE unless tagged; no video playback possible here]
+  - BASIS: git show/diff e4b4bf0755~1..e4b4bf0755; src/arch/MovieTexture/ at
+    beta~1 equals v1.3.0, so the diff IS the v1.3.0 -> beta change. Read in full:
+    new MovieTexture_FFMpeg.cpp/.h, all hunks of MovieTexture_Generic.cpp/.h,
+    the old FFMpeg code. Checked: g++ -std=c++17 -fsyntax-only -Wall -Wextra on
+    both .cpp against extern/ffmpeg-w32/include: exit 0, no warnings in these
+    files (not linked). PR thread not looked for [UNVERIFIED].
+  - COMMIT: Brandon W, author 2026-09-18, committer 2026-10-03, "Refactor video
+    decoding subsystem for performance, sync, and maintainability." No body. 4
+    files, +531/-523. Only MovieDecoder_FFMpeg implements MovieDecoder;
+    MovieTexture_Null untouched; Lua entry points (RageTexture.cpp ~106-114:
+    position/loop/rate) unchanged. No Docs mention.
+  1. WHAT CHANGED
+  a) Decoder. v1.3.0: sliding window of 50 FrameHolder raw AVFrames (comment
+     "roughly 100mb") plus packet_buffer_ growing one PacketHolder per packet
+     until EOF then reused for looping (payloads appear to stay resident
+     [INFERRED]); per-holder mutexes; the decode thread polled sleep_for(1 ms)
+     when full; sws_scale ran in GetFrame on the MAIN thread. Beta: a bounded
+     queue. The worker reads, decodes AND colour-converts into a ConvertedFrame;
+     kMaxQueueFrames=4 queued, kMaxPoolFrames=6 recycled; it blocks on a
+     condition variable when full (no polling). GetFrame on the main thread only
+     pops and memcpy's rows into the texture surface (or discards for nullptr).
+     Packets are not retained.
+  b) Timestamps: PTS = best_effort_timestamp, else pts, else pkt_dts; first
+     PTS subtracted; forced monotonic (a backwards PTS becomes last_pts +
+     last_duration); duration = pkt_duration, else avg_frame_rate, else 1/30 s.
+     v1.3.0 used pkt_dts (or last frame + delay).
+  c) Looping: v1.3.0 Rollover() plus an offset_ ring. Beta: the worker loops
+     itself. At EOF it marks the last QUEUED frame is_last_frame (or sets
+     end_of_movie_ if the queue is empty), then SeekToStart (av_seek_frame,
+     avcodec_flush_buffers, PTS reset) and keeps decoding. GetFrame returns 1
+     for the flagged frame; the Generic side sets clock_ = 0. Rollover() is a
+     no-op.
+  d) Display pacing (Generic.cpp): first frame shown at once
+     (first_frame_displayed_; SetPosition(0) clears it); frames more than 0.1 s
+     late (CheckFrameTime() < -0.1) are popped without upload until the front
+     frame is within 0.1 s or the queue is empty (the shown frame can then be up
+     to one frame early [INFERRED]); loop wrap sync: if loop_ and the front
+     frame's PTS < clock_ - 0.5, clock_ = that PTS; finished_ && loop_ triggers
+     Rewind() and restart; SetLooping now also forwards to the decoder (in
+     v1.3.0 Lua loop(false) changed only the Generic flag while the decoder kept
+     looping; on beta loop(false) lets the decoder thread exit at EOF).
+  e) Teardown: ~MovieTexture_Generic calls Cancel(), joins the thread, resets
+     the decoder; ~MovieDecoder_FFMpeg calls Cancel()+Close(); Close() frees
+     sws/codec/format contexts with the AVIO pb nulled first, deletes the
+     RageFile, uses avio_context_free.
+  2. SUPPORT FOR THE COMMIT MESSAGE (no measurement): removed 1 ms polling and
+     main-thread sws_scale; the main thread now memcpy's pitch x height per
+     shown frame [INFERRED: less main-thread work]. Sync: late-frame dropping and
+     best_effort_timestamp; no audio clock: clock_ still advances by engine
+     delta time x rate_ as in v1.3.0.
+  3. DIFFERENCES A PLAYER COULD SEE [INFERRED; not tested]
+  a) Look-ahead shrinks from 50 decoded frames to 4: ~133 ms at 30 fps, ~67 ms
+     at 60 fps, vs ~1.7 s at 30 fps. A decoder stall longer than that (slow disk,
+     CPU contention, heavy keyframes) shows as a held frame, then dropping of
+     late frames; likeliest for large videos on slow CPUs.
+  b) Memory per open movie (arithmetic only). Surface = image size (not padded
+     to a power of two: Generic.cpp ~226-229 [CODE]); ConvertedFrame = pitch x
+     height. 1280x720: ~1.8 MB (YUYV 2 B/px) or 3.7 MB (32-bit); 1920x1080: ~4.1
+     / 8.3 MB. Up to ~6 live frames = 11-22 MB (720p), 25-50 MB (1080p).
+     v1.3.0: 50 raw YUV420 frames (~1.4 MB at 720p, 3.1 MB at 1080p = ~69 /
+     155 MB) plus all packets (~the compressed file size).
+  c) Decode errors: the worker stops for good on any avcodec_receive_frame error
+     other than EAGAIN/EOF: logs "DecodeMovie: decoding error: N", leaves the
+     loop, returns 0; failure_ is NOT set, so the picture freezes on the last
+     frame. v1.3.0 treated a non-zero receive status as "likely not fatal" and
+     continued [CODE for both]. avcodec_send_packet errors only log a warning.
+     Whether real files hit receive_frame errors is [UNVERIFIED].
+  d) Lower CPU when the queue is full (no polling) [CODE].
+  4. OBSERVATIONS (not confirmed defects)
+  a) STALE end_of_movie_ WHEN LOOPING [CODE for the lines; MODEL for the
+     effect]. DecodeMovie EOF branch (~415-433): if the queue is EMPTY at EOF it
+     sets end_of_movie_=true; with looping_ it then seeks and continues, and
+     nothing clears the flag (writes: Init ~159, HandleReset ~236, both EOF
+     branches). EndOfMovie() = end_of_movie_ && queue empty. UpdateFrame treats
+     EndOfMovie() like a last frame and, when loop_, sets clock_=0. So after
+     such an EOF, each time the queue is momentarily empty the clock resets to 0
+     while the next PTS is later, and display waits for the clock to catch up
+     (the wrap-sync handles only frames EARLIER than the clock). The flag is set
+     only when decoding is not staying ahead of display at the loop point
+     (normally the queue holds up to 4 frames at EOF and the flagged-frame path
+     is used).
+     MODEL: a 60-line time-stepped Python transcription (not the real class; not
+     saved). 30 fps, 60-frame loop, 12 s, consumer at 60 Hz: decode 2 ms/frame:
+     6 loops, 6 clock resets, flag False. Decode 40 ms/frame (slower than real
+     time): flag stuck True, 14 clock resets for 2-4 loops (~8 spurious). Decode
+     30 ms: same as 2 ms. With the flag also cleared on seek: 0 resets. A
+     candidate one-line change: set end_of_movie_ only when !looping_ (not
+     applied; not tested on the real class). The model fixes the rates; real-world
+     likelihood UNKNOWN.
+  b) LOST WAKE-UP WINDOW [INFERRED from C++ condition_variable rules]: Cancel()
+     and Rewind() set atomics WITHOUT queue_mutex_ then notify_all; a notify
+     between the worker's predicate check and its block is lost. For Cancel() the
+     main thread then waits in join() with nobody to notify: a hang on destroying
+     a movie texture. Tiny window, only while the queue is full; not observed.
+  c) can_consume_cv_ is notified in four places and never waited on.
+  d) last_pts_, last_duration_, timestamp_offset_, first_pts_seen_ are written
+     by the worker without queue_mutex_; GetTimestamp reads last_pts_ under the
+     lock only when the queue is empty. Formally a data race; small practical
+     effect [INFERRED].
+  e) Restart after the thread exited: with loop(false) the worker exits at EOF
+     (or after a decode error, 3c). Rewind() only sets reset_, serviced only by
+     the worker, so Rewind/position(0) cannot restart it; SetPosition does not
+     clear finished_. Same reading for v1.3.0 (UpdateFrame returned early when
+     finished_), so no regression seen; callers: Lua RageTexture:position(),
+     Sprite.cpp ~854, ActorMultiVertex.cpp ~374. The new finished_&&loop_
+     restart branch has the same limit if loop is turned on after the thread
+     ended [INFERRED].
+  f) GetFrame copies rows into the texture surface; with
+     MovieTextureDirectUpdates (default true, Generic.cpp ~32) the surface
+     pointer is locked texture memory (~230-234). Behaviour with the other
+     setting not read [UNVERIFIED].
+  5. COMPATIBILITY: new code reads AVFrame::pkt_duration and
+     best_effort_timestamp, present in the pinned FFmpeg: extern/ffmpeg commit
+     9bc0bcce7a is RELEASE 5.1.8 (libavutil 57.28; raw headers fetched); the
+     Windows bundle extern/ffmpeg-w32 is libavutil 57.28 / libavcodec 59.37.
+     Other FFmpeg lines (system FFmpeg) not checked [UNVERIFIED]. Prefs unchanged:
+     MovieColorDepth (default 32), MovieTextureDirectUpdates (default true).
+  6. IN-GAME CHECKS (I cannot run these): (1) same video background/banner on
+     v1.3.0 and beta: smoothness, CPU, RSS with several videos; (2) a large
+     looping BGA on a slower CPU: freeze at the loop point of about the video
+     position in seconds? (4a); (3) heavy disk/CPU load during playback: hold,
+     then clean catch-up? (3a); (4) Log.txt "DecodeMovie: decoding error" on real
+     files (3c); (5) Lua loop(false) on a movie texture: does it stay on the last
+     frame; does position(0) restart it? (4e); (6) leave/re-enter video screens
+     quickly many times: any hang on exit? (4b; expected never).
+  - Not done: the PR discussion; any measurement; a real-file test; Lua docs for
+    RageTexture loop/position.
+ 
+ 
+7v. TEST ROUND OF TOGGLE UI / SL PATCHES / SEARCH SHORTCUT AND THE RELOAD-PROFILE FINDING (2026-10-06/07)
+  [TESTED] = user-run; code tags as elsewhere; I did not run the game. Code read
+  on v1.3.0 8a3bf8884a and Simply Love dd06138; beta head seen now is 7b34bfe2ac
+  (it moved from e4b4bf0755; the new commits are NOT reviewed).
+  State: all patches merged in the user's ITGmania and Simply Love forks; latest
+  build installed.
+  1. Results of the first 11 questions: see sketch Part I1 (all as predicted;
+     the SL operator-menu entry works; Start on a freshly Off but still loaded
+     pack opens the song page, a skipped pack gives the invalid sound after a
+     restart; skip log line present; both reload paths restore a pack; scores
+     intact in Stats.xml). Usability note: ~90 packs is tedious without
+     search/jump.
+  2. Search shortcut: F opens the search; search works as via the menu [TESTED].
+     Remaining 7m checks are open (Part I3, 27-36).
+  3. TERMS: "full reload" in my replies = service-menu "Reload Songs"
+     ([ScreenReloadSongs] OnlyLoadAdditions=false -> SONGMAN->Reload(false)).
+     SL's sort-menu "Load New Songs" = ScreenReloadSongsSSM, OnlyLoadAdditions=
+     true -> LoadAdditions (no unjoin, songs are only added). Neither is an
+     application restart.
+  4. FINDING: service-menu Reload Songs clears the saved default profile of
+     joined players [TESTED effect; mechanism CODE v1.3.0, INFERRED combination].
+     Not caused by the toggle patches (they do not touch Reload or profiles).
+     Chain:
+     a) Service-menu screens force-join all players: _fallback
+        [ScreenOptionsSimple] ForceAllPlayers=true (metrics.ini ~2749) and
+        ScreenOptionsMaster::Init joins every player when it is set (~44).
+        Simply Love's [ScreenOptionsService] falls back to ScreenOptionsSimple
+        and I found no ForceAllPlayers override in SL metrics.ini.
+     b) ScreenTitleMenu's constructor calls GAMESTATE->Reset() (~33), which
+        unjoins everyone and unloads profiles, so players forced into the
+        service menu have NO profile loaded.
+     c) SongManager::Reload (SongManager.cpp ~175-255): for each joined player
+        with no persistent profile and no memory card it queues
+        (pn, "", false) (third branch), then unjoins and unloads.
+     d) After InitAll it rejoins and, for non-card entries, runs
+        PROFILEMAN->m_sDefaultLocalProfileID[pn].Set(profileID) (~248). With an
+        empty profileID this CLEARS the saved default profile, then
+        LoadLocalProfileFromMachine finds nothing.
+     e) Preferences.ini still showed DefaultLocalProfileIDP1=testing while the
+        game ran (file not rewritten) and lost it at close, so the in-memory
+        value was cleared. [TESTED]
+     f) Load New Songs never calls Reload(), so it does not touch the profile
+        [TESTED by user; CODE].
+     Tests [TESTED]: Manage Local Profiles showed "testing" as P1 before
+     Reload Songs and not after; the Preferences.ini entry disappeared at game
+     close; re-selecting "testing" as P1 in Manage Local Profiles afterwards
+     held persistently. After Reload Songs the game goes to the TITLE screen,
+     not back to the service menu: [ScreenReloadSongs] NextScreen=
+     Branch.TitleMenu() (_fallback metrics.ini ~3288; no SL override found).
+     Simply Love's main flow shows no profile select; it plays as guest unless
+     a default profile is saved (user observation; SL's ScreenSelectProfile was
+     not read).
+     Beta: git diff --stat v1.3.0..7b34bfe2ac shows SongManager.cpp +11 lines
+     (series notes 12h: only GetGroupsInSeries) and GameState.cpp +7 -
+     (unrelated), so Reload() reads the same on beta [CODE by diff size; the
+     SongManager hunks were not re-read today].
+     Reading: looks like an upstream defect (the guest path wipes a saved
+     default). Observation, not a confirmed defect; intent unknown.
+     FIX IDEA, NOT WRITTEN OR TESTED (parked at the user's request 2026-10-07):
+     in Reload(), skip the m_sDefaultLocalProfileID Set when profileID is empty
+     (or queue only players that had a persistent profile). Outside the toggle
+     patches; would be a separate small patch.
+  5. Related code facts [CODE v1.3.0]:
+     - The operator key is GAME_BUTTON_OPERATOR; default keyboard mapping
+       KEY_SCRLLOCK (InputMapper.cpp:80). HandleGlobalInputs (StepMania.cpp
+       ~1128): if AllowOperatorMenuButton, PopAllScreens, GAMESTATE->Reset(),
+       SetNewScreen(OperatorMenuScreen). [ScreenOptionsService]
+       AllowOperatorMenuButton=false. User mapping/SL defaults not checked.
+     - Manage Local Profiles marks P1/P2 from the saved pref
+       m_sDefaultLocalProfileID (ScreenOptionsManageProfiles.cpp ~173), not from
+       what is loaded. GameState::LoadProfiles (~597) loads from that pref when a
+       player joins; GameState::Reset keeps the pref. So "still marked P1" does
+       not show a profile stayed loaded.
+     - Other writers of the pref: GameCommand.cpp ~839, ScreenSelectProfile.cpp
+       ~219, ScreenOptionsManageProfiles.cpp ~257/~324, SongManager.cpp ~248;
+       DeleteLocalProfile clears matching entries (ProfileManager.cpp ~904).
+  6. Open tests: sketch Part I3 (items 12-36).
+ 
+ 
+7w. WHEEL TIMING ON A 5406-SONG LIBRARY (2026-10-07, user-reported) - sketch Part I4
+  [TESTED = user-run log excerpts; reading INFERRED.] Build: same fork as 7n.
+  - LogWheelTimings=0 writes no WheelTiming lines (item 24 done).
+  - 5406 songs / 168 groups vs 3211 songs / 146 groups (~2200 songs skipped via
+    DisabledGroups): per-sort build and filter times drop 37-48 percent, about
+    in line with 41 percent fewer songs. Filter ~1.5 us/item; Series build
+    70.1 -> 38.4 ms, Group 77.4 -> 42.4, Meter build+filter 83 -> 45 ms; wheel
+    Load 57 -> 31 ms (first) and 19 ms (second). Table in sketch I4.
+  - Skipped-run repeat (after leaving to title) agrees within 1-2 ms. A sort is
+    logged once per visit to song select (valid sorts return before the timing
+    code; Load resets statuses), which explains one set in the all-on run
+    (no title round trip) and two in the skipped run.
+  - The earlier cold-start gap (7n) was not reproduced at this size.
+  - Measured state is skip-at-load; hide-only timing and per-frame cost not
+    measured. Effect is a few frames' hitch at screen entry and first use of
+    each sort, not a frame-rate change.
+ 
+ 
+8. KNOWN-WRONG CLAIMS (earlier statements corrected; do not repeat)
+-------------------------------------------------------------------
+  1. Close-folder fallback is "MenuUp+MenuDown": WRONG. Beta dance/pump value is
+     "@MenuDown-MenuUp" (7b; swapped from "@MenuUp-MenuDown" by edd3860083).
+  2. Extra song folders are loaded by separate LoadSongDir calls: WRONG. One
+     call; extra folders are VFS mounts (7p).
+  3. SortRStringArray decides SeriesBanner order: WRONG. std::map byte order
+     does (3a).
+  4. Reload(false) re-parses every song: WRONG. FastLoad off only adds a
+     directory-hash validity check; valid cache files are used (7g, sketch A1).
+  5. Song:GetEnabled(): WRONG name; it is Song:IsEnabled() (7f). The new Group
+     method is Group:IsEnabled().
+  6. Undo covers timing changes / 11 SaveUndo calls: WRONG. Note data only; 10
+     call sites (7d).
+  7. IsSongSort change only affects Series: WRONG. Range test also admits
+     Recent, RecentP1/P2, Length (7r).
+  8. "GetCacheFile resolves only Banner": WRONG. All six types (7s).
+  9. A cached load builds timing lookup tables: WRONG. It builds none (7q).
+  10. A leading "_" hides a pack: MYTH. Only "._" does, as a side effect (7f).
+  11. Beta head 28e58a78c7 dates: author 2026-09-26, committer 2026-09-28; the
+      head is now e4b4bf0755 (7r).
+  12. UNRESOLVED (not "wrong"): repeated DisabledSongs lines: user saw the FIRST
+      win, code says the LAST wins (7l).
+  13. "Entering the service menu via the operator key / Reset is why Reload
+      Songs loses the profile": INCOMPLETE, not the cause (2026-10-07). The title
+      route also Resets, and the pref survives Reset. Cause: forced join plus the
+      empty-ID rejoin in SongManager::Reload (7v).
+  14. "Reload Songs returns to the service menu": WRONG. It goes to the title
+      screen ([ScreenReloadSongs] NextScreen=Branch.TitleMenu()) (7v).
