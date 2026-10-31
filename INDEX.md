@@ -1,5 +1,5 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-10-30-l (older flat notes and patches moved into notes/ and patches/) | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-10-30-m (older flat notes and patches moved into notes/ and patches/; stale known gaps and superseded engine notes row removed) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
@@ -7,7 +7,7 @@ Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 2
 REPO WORKFLOW (2026-10-30): the GitHub repo wolfemian-del/itgmania-notes IS the canonical store. There is no
  second copy: the old Project docs are deprecated and must not be edited. All paths in this file are repo paths.
  Edit files in place and commit; git history replaces whole-file re-typing, and files may be moved with git mv.
- itgmania_engine_notes.txt (superseded) is intentionally not in the repo. Licensing: see NOTICE.
+ Licensing: see NOTICE.
 
 HOW TO START A CHAT
  1. Read this file. Pick the topic row(s) below; read only those files/sections.
@@ -77,7 +77,6 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   notes/itgmania_course_builder_findings.txt | NEW 2026-10-24: ACTIVE; .crs syntax and course loading read from source; script and GUI mock-tested only; in-game checks section 7 open; 5.3 and 10.1 are extended by cref | engine v1.3.0 8a3bf8884a; model difficulty_model_notech.json | 2026-10-28-i | FS
   notes/itgmania_course_format_reference.txt | NEW 2026-10-30: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files) | 2026-10-30-j | FS
   notes/itgmania_score_matching_findings.txt | NEW 2026-10-25: ACTIVE read-only findings; nothing built or run; how a stepfile is matched to a score in a profile (renaming/moving songs, Stats.xml, edit charts); cite as score:N | engine v1.3.0 8a3bf8884a; beta NOT checked | 2026-10-25-b | FS
-  itgmania_engine_notes.txt | SUPERSEDED by the four files above (same content, split); delete after the user compares | v1.3.0 | 2026-10-07-b | REV
   notes/itgmania_series_notes.txt | ACTIVE, complete | v1.3.0; section 12 = beta e4b4bf0755 | 2026-10-04-a | REV
   notes/itgmania_pack_toggle_sketch.txt | ACTIVE; open test list Part I3 | v1.3.0; patches apply to beta c8e69b9ca8 (git apply --check, not compiled) | 2026-10-07-b | REV
   notes/itgmania_editor_notes.txt | ACTIVE, complete (in-game checks only) | beta 28e58a78c7 (some items c8e69b9ca8) | 2026-10-11-a | FS
@@ -166,17 +165,9 @@ FOLDER LAYOUT (repo paths)
    difficulty_model_notech.json). Keep them beside the course scripts when running them.
 
 KNOWN GAPS IN THE FILES (as of this revision; entries written before 2026-10-30 refer to the Project era: "re-typed" = rewritten whole through the Project tools, "Project copies" = the now-deprecated Project docs)
- - Stage-2 split done 2026-10-12 (new filenames). The user still has to compare and delete
-   itgmania_engine_notes.txt; both copies are in the Project until then. The 4 new files were
-   typed section by section from the old one; every section ID was checked to appear exactly
-   once, but the text was not diffed mechanically (no local copy of the original exists).
  - Older files (sketch, series notes, input/misc/padsensor/editor notes, patches, difficulty
    notes) still say "engine notes 7x" or "section 00 manifest"; use the SECTION MAP above. The
    manifest and ls procedure no longer exist (replaced by this index).
- - FILE STATUS headers are in 12 files (see the table). The series, sketch and difficulty notes and the
-   writeup were NOT given one: the Project tools replace whole files, so adding a header means
-   re-typing 20-30 kB with no way to diff it. Their rows in the table serve instead. Patches,
-   scripts and JSON were left untouched on purpose (whitespace-sensitive code, no comment syntax).
  - diffnotes section 11 repeats the deployed-model and in-game entries; use the writeup.
  - The difficulty writeup (claude/itgmania_difficulty_rating_writeup.txt) does not yet mention the
    display-meter work, the modeled-sort evaluation or the course builder; its open items (section 10) are unchanged. See display notes
@@ -184,9 +175,6 @@ KNOWN GAPS IN THE FILES (as of this revision; entries written before 2026-10-30 
  - toggle:7v item 4, engine:6 item 13 and reload:8 still say "PARKED" / "not committed" (not re-typed, to
    avoid undiffed rewrites of large files); the topic row above supersedes them. The reload topic row's
    "results unread" for the Actions builds can now be checked with gh run list (not done).
- - INDEX.md itself was re-typed in full on 2026-10-13, four times on 2026-10-14, four times on 2026-10-15,
-   twice on 2026-10-16, twice on 2026-10-24, and again on 2026-10-30 (cref rows); the rest was copied
-   from the previous revision and not diffed.
  - offrec: the beta/upstream comparison (offrec:14) diffed whole files but checked only the lines the
    findings depend on in the larger changed files (Player, GameState, ScreenDebugOverlay,
    ScreenGameplay, Song, TimingData, ProfileManager); other upstream Simply Love branches were not
