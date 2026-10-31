@@ -1,5 +1,5 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-10-31-e (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-10-31-f (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
@@ -104,6 +104,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   notes/itgmania_course_builder_findings.txt | NEW 2026-10-24: ACTIVE; .crs syntax and course loading read from source; script and GUI mock-tested only; in-game checks section 7 open; 5.3 and 10.1 are extended by cref | engine v1.3.0 8a3bf8884a; model difficulty_model_notech.json | 2026-10-31-a | FS
   notes/itgmania_course_format_reference.txt | NEW 2026-10-30: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files) | 2026-10-31-b | FS
   notes/itgmania_score_matching_findings.txt | NEW 2026-10-25: ACTIVE read-only findings; nothing built or run; how a stepfile is matched to a score in a profile (renaming/moving songs, Stats.xml, edit charts); cite as score:N | engine v1.3.0 8a3bf8884a; beta NOT checked | 2026-10-25-b | FS
+  notes/archive/itgmania_engine_notes.txt | ARCHIVE (superseded 2026-10-12 by engine/loadmem/toggle/beta; fallback copy only; see notes/archive/README.txt). FILE NOT YET IN THE REPO: upload the exact Project copy (76512 bytes) here | v1.3.0 | 2026-10-07-b | REV
   notes/itgmania_series_notes.txt | ACTIVE, complete | v1.3.0; section 12 = beta e4b4bf0755 | 2026-10-31-a | FS
   notes/itgmania_pack_toggle_sketch.txt | ACTIVE; open test list Part I3 | v1.3.0; patches apply to beta c8e69b9ca8 (git apply --check, not compiled) | 2026-10-31-a | FS
   notes/itgmania_editor_notes.txt | ACTIVE, complete (in-game checks only) | beta 28e58a78c7 (some items c8e69b9ca8) | 2026-10-11-a | FS

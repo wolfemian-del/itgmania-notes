@@ -19,6 +19,7 @@ Each note names the version it applies to. Behavior may differ in newer releases
 |---|---|
 | `INDEX.md` | Entry point: topics, status of every file, open work |
 | `notes/` | Findings files (engine map, series, editor, input, courses, sorting, offsets, scoring, CodeQL, difficulty writeup and cache spec, etc.) |
+| `notes/archive/` | Superseded fallback copies only; never a source of findings |
 | `patches/` | Patches (`git apply`); see INDEX for status of each |
 | `tools/difficulty/`, `tools/course/` | Course builder (script and GUI), difficulty-model scripts, model JSON, `DifficultyModel.lua`; `.crs` parser tests |
 
