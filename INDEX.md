@@ -1,8 +1,35 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-10-31-a (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-10-31-b (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
+
+FILE STATUS LABELS (use exactly these words at the start of a status cell; add OPEN-CHECKS if in-game items remain)
+ REFERENCE            spec or map; prefer it over older overlapping notes
+ ACTIVE               work in progress; claims may still move
+ PATCH-BUILT-TESTED   built and exercised in game (or CI plus user confirmation)
+ PATCH-APPLY-CHECKED  applies cleanly / syntax-checked; NOT claimed as run
+ ARCHIVE              superseded or chronological log; history only
+ A label is not proof: nothing is production-proven unless the note carries [TESTED]/[OBSERVED].
+
+PREFIX GLOSSARY (citation prefix -> primary file -> what it covers)
+ engine    notes/itgmania_engine_notes_v3.txt              core: workspace setup, architecture map, to-do, KNOWN-WRONG CLAIMS
+ loadmem   notes/itgmania_load_memory_findings.txt         song loading, memory, caches, timing tables
+ toggle    notes/itgmania_toggle_findings.txt              pack/song toggle (DisabledGroups), wheel timing, SL operator menu
+ beta      notes/itgmania_beta_findings.txt                read-only findings on the beta branch
+ series    notes/itgmania_series_notes.txt                 Pack.ini Series / SORT_SERIES
+ sketch    notes/itgmania_pack_toggle_sketch.txt           pack toggle design, build log, open test list (Part I3)
+ diffnotes notes/itgmania_difficulty_rating_notes.txt      chronological log of the difficulty-rating work (archive)
+ writeup   notes/itgmania_difficulty_rating_writeup.txt    derived difficulty rating: the organized account
+ display   notes/itgmania_display_meter_findings.txt       show the modeled rating instead of the official meter
+ reload    notes/itgmania_reload_profile_fix_evaluation.txt  Reload Songs clears the saved P1 profile
+ offrec    notes/itgmania_offset_recommend_findings.txt    Global Offset recommendation from session tap data
+ codescan  notes/itgmania_codescan_findings.txt            CodeQL alert triage on the fork
+ msort     notes/itgmania_modeled_sort_findings.txt        sorting the wheel by the modeled rating
+ course    notes/itgmania_course_builder_findings.txt      building .crs files from modeled difficulty (script, GUI)
+ cref      notes/itgmania_course_format_reference.txt      .crs format, #MODS, #SONGSELECT, engine parse rules
+ score     notes/itgmania_score_matching_findings.txt      how a stepfile is matched to a score in a profile
+ Other notes (input, padsensor, editor, editor_clipboard_mouse, misc, cache_format_spec) have no prefix; use the topic table.
 
 REPO WORKFLOW (2026-10-30): the GitHub repo wolfemian-del/itgmania-notes IS the canonical store. There is no
  second copy: the old Project docs are deprecated and must not be edited. All paths in this file are repo paths.
@@ -158,7 +185,7 @@ FOLDER LAYOUT (repo paths)
  Applied (2026-10-30): notes/ (all notes, the difficulty writeup and the cache format spec), patches/ (all .patch files and the
    hand-edit text), tools/difficulty/ (course builder, difficulty-model scripts, model JSON and Lua), tools/course/,
    INDEX.md/README.md/NOTICE at the root. claude/ was emptied 2026-10-31 and is gone; nothing is loose at the root.
- New files: always give an explicit folder path; never create new files at the root except INDEX/README/NOTICE.
+ New files: always give an explicit folder path; never create new files at the root except INDEX/README/NOTICE/AGENTS.
  Filenames use underscores; scripts import each other by exact name (extract_chart_features.py,
    difficulty_model_notech.json). Keep them beside the course scripts when running them.
 
