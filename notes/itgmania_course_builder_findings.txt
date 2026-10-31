@@ -1,8 +1,11 @@
 ITGMANIA COURSE BUILDER (COURSES FROM MODELED DIFFICULTY) - FINDINGS
-REVISION: 2026-10-30-a | file: notes/itgmania_course_builder_findings.txt
+REVISION: 2026-10-31-a | file: notes/itgmania_course_builder_findings.txt
 
 FILE STATUS
-  Status:     ACTIVE. Script and GUI written and mock-tested; NOT run on the user's real cache; no .crs loaded in game.
+  Status:     ACTIVE; OPEN-CHECKS (section 7). Script and GUI mock-tested; GUI [OBSERVED 2026-10-25] running on the user's Windows 11 x64
+              with the real cache (35,290 charts scanned in about 30 s, layout and Japanese titles fine). In-game results: C7 failoff and
+              T1/T3 (section 12, 2026-10-28); the other checks in section 7 are open. Open: FastLoad stale-course behaviour (5.5), no-fail
+              engine fix (patches/itgmania_course_reset_song_level_v1.3.0.patch, apply-checked, not built), #STYLE ignored (10.3).
   Basis:      engine v1.3.0 8a3bf8884a (src/CourseLoaderCRS.cpp, Course.cpp, Difficulty.cpp, Song.cpp, MsdFile.cpp,
               SongManager.cpp read 2026-10-24); deployed model tools/difficulty/difficulty_model_notech.json
   Topic key:  course

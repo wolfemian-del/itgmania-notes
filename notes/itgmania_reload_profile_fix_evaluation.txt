@@ -1,6 +1,6 @@
 ITGMANIA - RELOAD SONGS DROPS THE SAVED DEFAULT PROFILE: FIX EVALUATION
-REVISION: 2026-10-14-a | file: notes/itgmania_reload_profile_fix_evaluation.txt
-FILE STATUS: ACTIVE | basis: v1.3.0 (8a3bf8884a); beta 3f5f27725a has an identical SongManager::Reload
+REVISION: 2026-10-31-a | file: notes/itgmania_reload_profile_fix_evaluation.txt
+FILE STATUS: PATCH-APPLY-CHECKED; OPEN-CHECKS (section 7) | pushed 2026-10-14 to the fork branches release (51bf20206) and beta (7b83223dd); fork Actions builds triggered, results not read; not built or run in game | basis: v1.3.0 (8a3bf8884a); beta 3f5f27725a has an identical SongManager::Reload
  topic key: Reload Songs clears saved P1 profile | read-when: deciding on / testing the fix
  see-also: toggle:7v item 4 (the finding), engine:6 item 13, patches/reload_keep_default_profile.patch
 Tags: [CODE] [INFERRED] [UNVERIFIED] [TESTED]. I cannot run the game: nothing here was run in game.
@@ -63,5 +63,7 @@ Tags: [CODE] [INFERRED] [UNVERIFIED] [TESTED]. I cannot run the game: nothing he
  5. After step 1, start the game fresh: the default profile should auto-load as before.
 
 8. STATUS / NEXT
- Patch drafted, syntax-checked, NOT committed or pushed to the forks (release, beta) yet.
- Next: user decides; if yes, commit to wolfemian-del/itgmania release and beta, then run checks above.
+ Patch drafted 2026-10-14, apply-checked (v1.3.0, beta 3f5f27725a), g++ syntax-checked; committed and pushed 2026-10-14 to the fork
+ branches release (51bf20206) and beta (7b83223dd). Fork Actions builds were triggered by the push (results unread; gh run list can read them).
+ NOT built or run in game. Next: run the in-game checks (section 7).
+ (Corrected 2026-10-31: this section earlier said "not committed or pushed".)

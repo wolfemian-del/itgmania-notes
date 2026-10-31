@@ -1,8 +1,10 @@
 ITGMANIA COURSE (.crs) FORMAT - REFERENCE FROM SOURCE (supported / unsupported behaviour)
-REVISION: 2026-10-30-j | file: notes/itgmania_course_format_reference.txt | prefix: cref
+REVISION: 2026-10-31-a | file: notes/itgmania_course_format_reference.txt | prefix: cref
 
 FILE STATUS
-  Status:     ACTIVE. Read-only code analysis plus one synthetic parser test. Nothing built, nothing run in game.
+  Status:     ACTIVE; OPEN-CHECKS. Read-only code analysis plus one synthetic parser test. In-game checks (section 16) 2026-10-30:
+              M1, M2, M5, M6/M6b, M7, M8, M10 PASS or matched; M3 pending M3b/M3c (mirror logged, not visible); M9 noteskin did not change;
+              M4 and M11 pending. Details in section 16.
   Basis:      engine v1.3.0 8a3bf8884a (all [CODE] line numbers). Beta 26d81c1a6f compared (section 15).
   Topic key:  cref
   Read when:  writing or debugging .crs files; answering "does tag/mod X work?"; building user docs for courses.
@@ -394,7 +396,7 @@ FILE STATUS
   writer GENRE flag, SetupSong attack loop and SetCurrentToLevel(Stage). Docs/CourseFormat.txt and the examples unchanged.
   All findings apply to beta.
 
-16. IN-GAME CHECKS (none run) - implemented by tools/course/make_cref_test_pack.py (12 .crs + CHECKLIST.txt;
+16. IN-GAME CHECKS (partly run 2026-10-30, results per item) - implemented by tools/course/make_cref_test_pack.py (12 .crs + CHECKLIST.txt;
     M10 is split into M10a/M10b). Add to the checks: M12 (R1) a course with "#MODS:TIME=0:LEN=9999:MODS=no jumps;" before
     a #SONG, to confirm the form the Reddit thread could not find; not yet in the generator.
   M1  Two-song course; song 1 mods "#MODS:TIME=10:LEN=10:MODS=reverse;" -> reverse for seconds 10-20. Predicted: works.
