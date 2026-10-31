@@ -1,6 +1,15 @@
 ITGMANIA PACK / SONG TOGGLE - ENGINE SKETCH - WORKING NOTES (v1.3.0, tag 8a3bf8884a)
 ====================================================================================
-REVISION: 2026-10-07-b | file: itgmania_pack_toggle_sketch.txt | bytes: 36611
+REVISION: 2026-10-31-a | file: notes/itgmania_pack_toggle_sketch.txt | bytes: 36611
+
+FILE STATUS
+ status:     ACTIVE; patches field-tested; OPEN-CHECKS Part I3 items 12-36
+ basis:      v1.3.0 8a3bf8884a; patches apply to beta c8e69b9ca8 (git apply --check, not compiled)
+ topic key:  sketch
+ read when:  working on the pack/song toggle (DisabledGroups) design, patches or their test list
+ see also:   toggle (7f, 7g, 7h, 7n, 7v); patches/itgmania_pack_toggle*.patch; patches/sl_toggle_songs.patch
+ (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
+
 Rev 2026-10-07-b: I3 items 24-26 DONE, results in I4; no code or patch changes.
 Rev 2026-10-07-a: adds Part I (user test results, open test list); no code or patch changes.
 Rev -a: Part C compressed to design notes (ids C1-C5 kept); no new findings.

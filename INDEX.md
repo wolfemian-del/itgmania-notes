@@ -1,5 +1,5 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-10-31-d (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-10-31-e (flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
@@ -104,16 +104,16 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   notes/itgmania_course_builder_findings.txt | NEW 2026-10-24: ACTIVE; .crs syntax and course loading read from source; script and GUI mock-tested only; in-game checks section 7 open; 5.3 and 10.1 are extended by cref | engine v1.3.0 8a3bf8884a; model difficulty_model_notech.json | 2026-10-31-a | FS
   notes/itgmania_course_format_reference.txt | NEW 2026-10-30: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files) | 2026-10-31-a | FS
   notes/itgmania_score_matching_findings.txt | NEW 2026-10-25: ACTIVE read-only findings; nothing built or run; how a stepfile is matched to a score in a profile (renaming/moving songs, Stats.xml, edit charts); cite as score:N | engine v1.3.0 8a3bf8884a; beta NOT checked | 2026-10-25-b | FS
-  notes/itgmania_series_notes.txt | ACTIVE, complete | v1.3.0; section 12 = beta e4b4bf0755 | 2026-10-04-a | REV
-  notes/itgmania_pack_toggle_sketch.txt | ACTIVE; open test list Part I3 | v1.3.0; patches apply to beta c8e69b9ca8 (git apply --check, not compiled) | 2026-10-07-b | REV
+  notes/itgmania_series_notes.txt | ACTIVE, complete | v1.3.0; section 12 = beta e4b4bf0755 | 2026-10-31-a | FS
+  notes/itgmania_pack_toggle_sketch.txt | ACTIVE; open test list Part I3 | v1.3.0; patches apply to beta c8e69b9ca8 (git apply --check, not compiled) | 2026-10-31-a | FS
   notes/itgmania_editor_notes.txt | ACTIVE, complete (in-game checks only) | beta 28e58a78c7 (some items c8e69b9ca8) | 2026-10-11-a | FS
   notes/itgmania_editor_clipboard_mouse_notes.txt | ACTIVE, complete (in-game checks only) | beta 28e58a78c7 | 2026-10-11-a | FS
   notes/itgmania_input_notes.txt | ACTIVE, complete | beta 28e58a78c7 | 2026-10-11-a | FS
   notes/itgmania_padsensor_notes.txt | ACTIVE, complete (hardware checks only) | beta 28e58a78c7 (some items c8e69b9ca8) | 2026-10-11-a | FS
   notes/itgmania_misc_notes.txt | ACTIVE, four items done (hardware/in-game checks only) | beta 28e58a78c7; WASAPI driver itself is in v1.3.0 | 2026-10-11-a | FS
-  notes/itgmania_difficulty_rating_notes.txt | ARCHIVE (chronological log; the writeup is the organized account) | v1.3.0; beta not diffed | 2026-10-30-b | REV
+  notes/itgmania_difficulty_rating_notes.txt | ARCHIVE (chronological log; the writeup is the organized account) | v1.3.0; beta not diffed | 2026-10-31-a | FS
  Writeup (notes/)
-  notes/itgmania_difficulty_rating_writeup.txt | ACTIVE; open items section 10 | v1.3.0 + Simply Love; beta not diffed | 2026-10-11 (dated, no letter; path line updated 2026-10-30) | REV
+  notes/itgmania_difficulty_rating_writeup.txt | ACTIVE; open items section 10 | v1.3.0 + Simply Love; beta not diffed | 2026-10-31-a | FS
  Patches (patches/; apply order: toggle, toggle_ui, wheel-timing, clang fix; SL patches go to the theme)
   patches/itgmania_pack_toggle_v1.3.0.patch | built and field-tested by the user | v1.3.0 (also applies to beta c8e69b9ca8) | none | none
   patches/itgmania_pack_toggle_ui_v1.3.0.patch | apply after the first; field-tested | v1.3.0 (also applies to beta c8e69b9ca8) | none | none
@@ -132,7 +132,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
    predict_meter_check.py | user-run on the real library | v1.3.0 cache format | uploaded 2026-10-11 | none
   tools/difficulty/DifficultyModelCheck.lua, DifficultyModel.lua | Lua port verified in game (Simply Love, dance-single) | v1.3.0 | uploaded 2026-10-11 | none
   tools/difficulty/difficulty_model_notech.json | deployed model; DifficultyModel.lua is generated from it | v1.3.0 | uploaded 2026-10-11 | none (JSON: no comments)
-  notes/itgmania_cache_format_spec.txt | written from the writer source; no real cache file inspected when written | v1.3.0 | not checked | not checked
+  notes/itgmania_cache_format_spec.txt | REFERENCE; written from the writer source, no real cache file inspected | v1.3.0 | 2026-10-31-a | FS
  Tools (tools/difficulty/)
   tools/difficulty/make_course_gui.py | NEW 2026-10-25: tkinter front end for the course builder; imports make_course_by_rating (same folder, plus extract_chart_features.py and the model JSON); standard library only; tested headless on Linux (Xvfb) with a synthetic cache, NOT on Windows, NOT on the real cache | course:9 | 2026-10-25 | docstring
   tools/difficulty/make_course_by_rating.py | NEW 2026-10-24, revised 2026-10-25 (load_library split into scan_library + filter_library for the GUI; CLI output unchanged): course builder; imports extract_chart_features.py and reads difficulty_model_notech.json (both now in the same folder); standard library only; mock-tested, NOT run on the real cache; the test used a stub of the extractor functions, not the full project file | v1.3.0 cache format + engine .crs syntax | 2026-10-24 | docstring

@@ -1,6 +1,15 @@
 ITGMANIA "SERIES" FEATURE - WORKING NOTES (v1.3.0)
 ==================================================
-REVISION: 2026-10-04-a | file: itgmania_series_notes.txt | bytes: 21759
+REVISION: 2026-10-31-a | file: notes/itgmania_series_notes.txt | bytes: 21759
+
+FILE STATUS
+ status:     REFERENCE (complete)
+ basis:      v1.3.0 8a3bf8884a; section 12 = beta e4b4bf0755
+ topic key:  series
+ read when:  working on Pack.ini Series / SeriesBanner or SORT_SERIES
+ see also:   engine:3, 3a; beta:7r
+ (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
+
 Rev -a: correction blocks in sections 3, 12c, 12g, 12h merged to current state (history: engine notes section 8); no new findings.
  
 Basis:    Source code of itgmania/itgmania at tag v1.3.0

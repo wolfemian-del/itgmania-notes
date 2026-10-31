@@ -1,6 +1,14 @@
 ITGMANIA: DERIVED DIFFICULTY RATING - HOOK POINTS IN RADAR / TECH-COUNT CODE (v1.3.0)
 =====================================================================================
-REVISION: 2026-10-30-b | file: notes/itgmania_difficulty_rating_notes.txt | companion: itgmania_difficulty_rating_writeup.txt
+REVISION: 2026-10-31-a | file: notes/itgmania_difficulty_rating_notes.txt | companion: itgmania_difficulty_rating_writeup.txt
+
+FILE STATUS
+ status:     ARCHIVE (chronological working log; the writeup is the organized account)
+ basis:      v1.3.0 8a3bf8884a; beta not diffed
+ topic key:  diffnotes
+ read when:  you need the code hook points (radar / tech-count) or the history of how the rating work went
+ see also:   notes/itgmania_difficulty_rating_writeup.txt; notes/itgmania_cache_format_spec.txt
+ (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
 Basis:    itgmania/itgmania tag v1.3.0 (8a3bf8884a), src/ read 2026-10-09.
           Not built, not run. Beta not diffed for these files (beta head seen
           7b34bfe2ac) [UNVERIFIED that they are unchanged].

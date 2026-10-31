@@ -1,6 +1,16 @@
 ITGMANIA: A DERIVED, SCALE-CONSISTENT DIFFICULTY RATING FROM CHART DATA
 =====================================================================
 WRITEUP | file: notes/itgmania_difficulty_rating_writeup.txt | 2026-10-11 (path updated 2026-10-30)
+REVISION: 2026-10-31-a
+
+FILE STATUS
+ status:     ACTIVE; open items section 10
+ basis:      v1.3.0 8a3bf8884a + Simply Love; beta not diffed
+ topic key:  writeup
+ read when:  you need the derived 1-19 difficulty rating: method, model, limits, deployment
+ see also:   diffnotes (code hooks); display, msort, course (uses of the model); tools/difficulty/
+ (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
+
 Engine:  itgmania/itgmania tag v1.3.0 (8a3bf8884a). Beta not diffed
          (head seen 7b34bfe2ac) [UNVERIFIED that the files used are unchanged].
 Theme:   Simply Love (in-game checks only).

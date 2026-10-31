@@ -1,6 +1,14 @@
 ITGMANIA SONG CACHE FILE FORMAT - SPEC FOR THE FEATURE EXTRACTOR (v1.3.0)
 =========================================================================
-REVISION: 2026-10-09-a | file: itgmania_cache_format_spec.txt
+REVISION: 2026-10-31-a | file: notes/itgmania_cache_format_spec.txt
+
+FILE STATUS
+ status:     REFERENCE
+ basis:      v1.3.0; written from the writer/loader source, no real cache inspected
+ topic key:  cache-format
+ read when:  writing or debugging tools/difficulty/extract_chart_features.py or any cache parser
+ see also:   notes/itgmania_difficulty_rating_writeup.txt (writeup); tools/difficulty/extract_chart_features.py
+ (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
 Basis: itgmania/itgmania tag v1.3.0 src/, read 2026-10-09. No real cache file
        was inspected (no build here); everything is from the writer/loader
        code. Tags: [CODE] read in source, [INFERRED], [UNVERIFIED].
