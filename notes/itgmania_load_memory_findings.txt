@@ -1,6 +1,6 @@
 ITGMANIA SONG LOADING, MEMORY, CACHES AND TIMING TABLES - FINDINGS
 ==================================================================
-REVISION: 2026-10-12-a | file: itgmania_load_memory_findings.txt | bytes: 18407
+REVISION: 2026-11-16-a | file: itgmania_load_memory_findings.txt | bytes: 20895
 Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
 sections are copied with their IDs unchanged (4, 4a-4g, 7p, 7q, 7s). No new
 code findings.
@@ -281,3 +281,37 @@ hide rows? ANSWER: it only hides rows. No measurement made.
     pointed to #1447 as already fixing it; author could not reproduce on a
     rebuilt branch [WEB, page fetched]. Link between #1447 and 05507f6b40 not
     checked [UNVERIFIED].
+
+7t. SONG MEDIA PATHS, EXTRA-FOLDER PREFS, CHART MUSIC (2026-11-16, v1.3.0 8a3bf88; beta not diffed) [CODE unless tagged]
+  Found while reviewing the viewer's proposal 0011 (song page). Corrects the
+  7p wording "copied to the Writable ones" as to precedence.
+  - Deprecated prefs: PrefsManager::TranslateDeprecatedFlags (PrefsManager.cpp
+    ~547-553, called ~443) copies a NON-EMPTY deprecated AdditionalSongFolders
+    over AdditionalSongFoldersWritable, so the deprecated value WINS when both
+    are set; it is not an "only if Writable is empty" fallback. The game never
+    writes the deprecated keys (Preference.cpp ~17), so this shows only in old
+    or hand-edited Preferences.ini. Data/Static.ini is read after
+    Preferences.ini and can override these prefs (PrefsManager.cpp ~438-443).
+  - Lookup priority, highest first: zips under Packages/ (MountTreeOfZips, ~837);
+    AdditionalSongFoldersWritable; AdditionalSongFoldersReadOnly;
+    AdditionalFoldersWritable + /Songs; AdditionalFoldersReadOnly + /Songs;
+    user-data Songs; install Songs. AddFilesystemDriver inserts at the front
+    (RageFileManager.cpp ~701-704) and MountFolders mounts a comma list in
+    order (StepMania.cpp ~715-724), so within one pref the LAST entry wins.
+    Windows: install dir = parent of the executable's folder, mounted read-only
+    at "/"; user data (AppData) is mounted after it, so it outranks install;
+    with Portable.ini there is no AppData mount (ArchHooks_Win32Static.cpp
+    ~53-102). The game does not log its mounts, so log.txt cannot recover them.
+  - FixupPath (Song.cpp ~640-648) only converts backslashes and trims spaces;
+    it does NOT join the value to the song folder (its song-path argument is
+    unused). Resolution is Song::GetSongAssetPath (~1696-1728): song folder +
+    value is tried first; a value with no "/" stays song-relative even if the
+    file is missing; "../" is resolved against the song folder and collapsed;
+    any other value containing a path is treated as relative to the virtual
+    filesystem top (DWI compatibility). Zip-pack media is reachable only through
+    the VFS, not by probing real folders. 7s notes beta reorders two checks in
+    this function with the same results.
+  - Chart-level #MUSIC: NotesWriterSSC.cpp ~429-431 writes it, NotesLoaderSSC.cpp
+    ~495 reads it into Steps, and Steps (~690-696) returns the chart's file when
+    non-empty, else the song's. Other tags' chart-level overrides not checked
+    [UNVERIFIED].
