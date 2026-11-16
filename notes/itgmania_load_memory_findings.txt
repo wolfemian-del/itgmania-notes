@@ -1,6 +1,6 @@
 ITGMANIA SONG LOADING, MEMORY, CACHES AND TIMING TABLES - FINDINGS
 ==================================================================
-REVISION: 2026-11-16-a | file: itgmania_load_memory_findings.txt | bytes: 20895
+REVISION: 2026-11-16-b | file: itgmania_load_memory_findings.txt | bytes: 21911
 Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
 sections are copied with their IDs unchanged (4, 4a-4g, 7p, 7q, 7s). No new
 code findings.
@@ -313,5 +313,19 @@ hide rows? ANSWER: it only hides rows. No measurement made.
     this function with the same results.
   - Chart-level #MUSIC: NotesWriterSSC.cpp ~429-431 writes it, NotesLoaderSSC.cpp
     ~495 reads it into Steps, and Steps (~690-696) returns the chart's file when
-    non-empty, else the song's. Other tags' chart-level overrides not checked
-    [UNVERIFIED].
+    non-empty, else the song's. Of the seven media tags (MUSIC, BANNER,
+    BACKGROUND, JACKET, CDTITLE, SAMPLESTART, SAMPLELENGTH) only MUSIC has a
+    chart-level handler: the SSC loader's steps_tag_handlers
+    (NotesLoaderSSC.cpp ~678-711) list MUSIC and none of the other six.
+    MUSICLENGTH and the sample window are song-level, so they describe the
+    song's music, not a chart override's.
+  - Deprecated-pref translation covers more than the song pair:
+    TranslateDeprecatedFlags (PrefsManager.cpp ~547-560) also copies a
+    non-empty AdditionalFolders over AdditionalFoldersWritable, and the course
+    pair likewise (same non-empty-wins rule as above).
+  - Sample window normalization: DEFAULT_MUSIC_SAMPLE_LENGTH = 12 s (Song.cpp
+    ~72); a length <= 0 falls back to it (~888-889); an unset start (-1), a
+    zero length, or a window running past the music's end gets a computed
+    start (~839-889). Only these lines were read (grep), not the whole block.
+    Whether the cache stores the cleaned-up or the raw values is untested
+    [INFERRED: the cache is written after load, so cleaned-up].

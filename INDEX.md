@@ -93,7 +93,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
  REV = has only a title + REVISION block; none = no header (code/patch/data).
  Notes (notes/)
   notes/itgmania_engine_notes_v3.txt | ACTIVE core: architecture, series state, to-do, errata | v1.3.0 8a3bf8884a; beta seen up to 7b34bfe2ac | 2026-10-12-a | FS
-  notes/itgmania_load_memory_findings.txt | ACTIVE, read-only findings | v1.3.0; 7q, 7s also checked on beta | 2026-11-16-a | FS
+  notes/itgmania_load_memory_findings.txt | ACTIVE, read-only findings | v1.3.0; 7q, 7s also checked on beta | 2026-11-16-b | FS
   notes/itgmania_toggle_findings.txt | ACTIVE; open tests sketch:I3; 7v item 4 says PARKED (now see reload) | v1.3.0 + Simply Love dd06138; patches apply to beta c8e69b9ca8 | 2026-10-12-a | FS
   notes/itgmania_beta_findings.txt | ACTIVE, read-only findings on beta | beta 28e58a78c7 -> c8e69b9ca8 -> e4b4bf0755 | 2026-10-12-a | FS
   notes/itgmania_display_meter_findings.txt | ACTIVE; patch built, in-game checks open (section 8) | v1.3.0 + Simply Love dd06138; beta not diffed | 2026-10-30-b | FS
