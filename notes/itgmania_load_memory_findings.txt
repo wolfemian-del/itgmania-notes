@@ -1,6 +1,6 @@
 ITGMANIA SONG LOADING, MEMORY, CACHES AND TIMING TABLES - FINDINGS
 ==================================================================
-REVISION: 2026-11-16-b | file: itgmania_load_memory_findings.txt | bytes: 21911
+REVISION: 2026-11-17-a | file: itgmania_load_memory_findings.txt | bytes: 22749
 Split out of itgmania_engine_notes.txt (rev 2026-10-07-b) on 2026-10-12; the
 sections are copied with their IDs unchanged (4, 4a-4g, 7p, 7q, 7s). No new
 code findings.
@@ -327,5 +327,17 @@ hide rows? ANSWER: it only hides rows. No measurement made.
     ~72); a length <= 0 falls back to it (~888-889); an unset start (-1), a
     zero length, or a window running past the music's end gets a computed
     start (~839-889). Only these lines were read (grep), not the whole block.
-    Whether the cache stores the cleaned-up or the raw values is untested
-    [INFERRED: the cache is written after load, so cleaned-up].
+    The cache stores the cleaned-up values: LoadFromSongDir calls
+    TidyUpData(false, ...) (Song.cpp ~388) and only then SaveToCacheFile()
+    (~396), and NotesWriterSSC.cpp writes SAMPLESTART/SAMPLELENGTH as %.6f
+    (~286-287). The same ordering means the image autodetect in TidyUpData
+    (banner/background/jacket/cdtitle by filename, ~907-960; not for profile
+    songs) is already applied, so an empty #JACKET: in the cache means the game
+    found none either [INFERRED for that reading].
+  - Media tag writer lines (v1.3.0): #BANNER :262, #BACKGROUND :264, #JACKET
+    :267, #CDTITLE :271, #MUSIC :272 are written unconditionally (blank as
+    "#TAG:;"); chart-level #MUSIC only when the chart's own file is non-empty
+    (:429-432).
+  - Fork check (2026-11-17): wolfemian-del/itgmania branch release (772575e):
+    NotesWriterSSC.cpp, NotesLoaderSSC.cpp and Steps.cpp identical to v1.3.0;
+    Song.cpp differs only by a Lua SetEnabled method (2 hunks, unrelated).
