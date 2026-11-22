@@ -1,5 +1,5 @@
 ITGMANIA CODE ANALYSIS - PROJECT INDEX
-REVISION: 2026-11-22-a (series note section 13 added; prior: 2026-10-31-g flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
+REVISION: 2026-11-22-b (cache spec 5b, 6; cref 19; prior 2026-11-22-a: series note section 13 added; prior: 2026-10-31-g flat notes, patches and the former claude/ files sorted into notes/, patches/, tools/difficulty/; stale known gaps removed) | file: INDEX.md | READ THIS FIRST in every chat
 Purpose: find the right file and section without reading everything. Not a findings file.
 Tags used in all files: [CODE] [INFERRED] [UNVERIFIED] [TESTED]/[OBSERVED] (user-run).
 Version basis: v1.3.0 (8a3bf8884a) unless a row says beta. Beta head last seen 26d81c1a6f (2026-10-29, course/mod files compared for cref; earlier: eac008e0ac 2026-10-24 modeled-sort enum only; engine beta 05a6439 2026-10-15 offrec only).
@@ -64,10 +64,12 @@ SECTION MAP (former itgmania_engine_notes.txt, split 2026-10-12; section IDs unc
  codescan (notes/itgmania_codescan_findings.txt): 1-8 (answer, how read, #464 ffmpeg, #461 shuffle seed, #427 malloc/delete + fix, #4/#5 alloca, excluding extern/ + alert handling, open)
  msort (notes/itgmania_modeled_sort_findings.txt): 1-8 (answer, how the Meter sort works, Steps data access/Compress safety/parity, enum/IsSongSort/persistence/unknown names, Simply Love sort menu, options A-D and decisions D1-D4, beta comparison, in-game checks and next steps)
  course (notes/itgmania_course_builder_findings.txt): 1-12 (answer and usage, .crs syntax, rating and picking, caveats, tests, in-game checks C1-C7, 9 GUI, 10 full .crs parameter reference, 11 Songs location, 12 failoff / fail-type reset and its patch; the note's own contents are the detail)
- cref (notes/itgmania_course_format_reference.txt): 1-18 (answer F1-F7, method, MSD syntax, header tags, #SONG, #SONGSELECT, timed #MODS 7, mod vocabulary 8, pipeline 9, lives/award 10, loading/cache 11, Lua API 12, doc-vs-code D1-D13 13, community claims 14, beta 15, in-game checks M1-M11 16, observations, open)
+ cref (notes/itgmania_course_format_reference.txt): 1-19 (answer F1-F7, method, MSD syntax, header tags, #SONG, #SONGSELECT, timed #MODS 7, mod vocabulary 8, pipeline 9, lives/award 10, loading/cache 11, Lua API 12, doc-vs-code D1-D13 13, community claims 14, beta 15, in-game checks M1-M11 16, observations, open)
 
 TOPIC TABLE (topic | read | status)
  Series feature (Pack.ini Series/SeriesBanner, SORT_SERIES) | notes/itgmania_series_notes.txt (1-11 = v1.3.0; 12 = beta; 13 = 2026-11-22 refinements: Pack.ini parse rules, banner resolution, run-based parent rows) ; engine:3, 3a ; beta:7r | complete
+ #STEPSTYPE values (18 engine strings, tracks, categories, case, unknown types) | notes/itgmania_cache_format_spec.txt section 6 ; score:4 | complete for v1.3.0; unknown-style steps in the cache [UNVERIFIED]
+ GrooveStats chart hash: Lua access and how Simply Love uses it | notes/itgmania_cache_format_spec.txt sections 5, 5b ; score:6 | engine side complete; service behaviour [UNVERIFIED]
  Pack/song toggle (DisabledGroups, UI, SL operator menu) | notes/itgmania_pack_toggle_sketch.txt (Parts A-I) ; toggle:7f, 7g, 7h, 7n, 7v ; patches/itgmania_pack_toggle*.patch, patches/sl_toggle_songs.patch | built + field-tested; open tests sketch:I3 items 12-36
  Wheel timing log (LogWheelTimings) | patches/wheel-timing-log.patch ; toggle:7n, 7w ; sketch:I4 | done
  SL song-search shortcut (F key) | patches/sl_song_search_shortcut.patch ; toggle:7m | F works; checks 27-36 open (sketch:I3)
@@ -102,7 +104,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
   notes/itgmania_codescan_findings.txt | NEW 2026-10-15: COMPLETE 2026-10-16 (0 open alerts); #427 fixed, extern/ filter works; only optional upstream reports left (section 8) | fork release 51bf20206 -> d5f0548 -> 16614f1 -> cbeaa30, beta 7b83223dd -> bd26dd6 -> fb259b3 -> 29275af; FFmpeg pin 9bc0bcce7a03 | 2026-10-16-c | FS
   notes/itgmania_modeled_sort_findings.txt | NEW 2026-10-24: ACTIVE read-only findings and design evaluation; nothing built or run; decisions msort:6 D1-D4 and in-game checks msort:8 open | engine v1.3.0 8a3bf8884a; beta eac008e0ac (enum, IsSongSort and Meter-sort call sites only); Simply Love dd06138 | 2026-10-30-a | FS
   notes/itgmania_course_builder_findings.txt | NEW 2026-10-24: ACTIVE; .crs syntax and course loading read from source; script and GUI mock-tested only; in-game checks section 7 open; 5.3 and 10.1 are extended by cref | engine v1.3.0 8a3bf8884a; model difficulty_model_notech.json | 2026-10-31-a | FS
-  notes/itgmania_course_format_reference.txt | NEW 2026-10-30: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files) | 2026-10-31-b | FS
+  notes/itgmania_course_format_reference.txt | NEW 2026-10-30; section 19 (Simply Love course handling, partly read) added 2026-11-22: ACTIVE; read-only analysis plus one synthetic parser test; nothing run in game; checks cref:16 open; Reddit thread analysed (cref:14) | engine v1.3.0 8a3bf8884a; beta 26d81c1a6f (course/mod files); Simply Love dd06138 (section 19) | 2026-11-22-a | FS
   notes/itgmania_score_matching_findings.txt | NEW 2026-10-25: ACTIVE read-only findings; nothing built or run; how a stepfile is matched to a score in a profile (renaming/moving songs, Stats.xml, edit charts); cite as score:N | engine v1.3.0 8a3bf8884a; beta NOT checked | 2026-10-25-b | FS
   notes/archive/itgmania_engine_notes.txt | ARCHIVE (superseded 2026-10-12 by engine/loadmem/toggle/beta; fallback copy only, uploaded 2026-10-31 by the user; see notes/archive/README.txt) | v1.3.0 | 2026-10-07-b | REV
   notes/itgmania_series_notes.txt | ACTIVE, complete; section 13 added 2026-11-22 and sections 2, 3, 10 corrected in place (Pack.ini parsing, SeriesBanner resolution, presentation refinements; read-only, nothing run) | v1.3.0; section 12 = beta e4b4bf0755; section 13d = beta 9778a4e36a spot-check | 2026-11-22-a | FS
@@ -133,7 +135,7 @@ FILE STATUS TABLE (file | status | version basis | revision | in-file header)
    predict_meter_check.py | user-run on the real library | v1.3.0 cache format | uploaded 2026-10-11 | none
   tools/difficulty/DifficultyModelCheck.lua, DifficultyModel.lua | Lua port verified in game (Simply Love, dance-single) | v1.3.0 | uploaded 2026-10-11 | none
   tools/difficulty/difficulty_model_notech.json | deployed model; DifficultyModel.lua is generated from it | v1.3.0 | uploaded 2026-10-11 | none (JSON: no comments)
-  notes/itgmania_cache_format_spec.txt | REFERENCE; written from the writer source, no real cache file inspected | v1.3.0 | 2026-10-31-a | FS
+  notes/itgmania_cache_format_spec.txt | REFERENCE; written from the writer source, no real cache file inspected; 5b (GS hash Lua access, Simply Love GS client) and 6 (#STEPSTYPE values) added 2026-11-22 | v1.3.0; Simply Love dd06138 (5b) | 2026-11-22-a | FS
  Tools (tools/difficulty/)
   tools/difficulty/make_course_gui.py | NEW 2026-10-25: tkinter front end for the course builder; imports make_course_by_rating (same folder, plus extract_chart_features.py and the model JSON); standard library only; tested headless on Linux (Xvfb) with a synthetic cache, NOT on Windows, NOT on the real cache | course:9 | 2026-10-25 | docstring
   tools/difficulty/make_course_by_rating.py | NEW 2026-10-24, revised 2026-10-25 (load_library split into scan_library + filter_library for the GUI; CLI output unchanged): course builder; imports extract_chart_features.py and reads difficulty_model_notech.json (both now in the same folder); standard library only; mock-tested, NOT run on the real cache; the test used a stub of the extractor functions, not the full project file | v1.3.0 cache format + engine .crs syntax | 2026-10-24 | docstring
@@ -218,5 +220,5 @@ KNOWN GAPS IN THE FILES (as of this revision; entries written before 2026-10-30 
    checked by count; one digit slip was found and fixed by comparing with the project text); the script reads
    whatever JSON the user puts beside it, so use the project's own difficulty_model_notech.json.
    course:5.3 (":;#" names unusable) is true for #SONG only; #SONGSELECT supports escapes (cref:6.3).
- - cref: the Reddit thread and PR #173 page were supplied by the user 2026-10-30 (cref:14); Simply Love's course handling was not read;
+ - cref: the Reddit thread and PR #173 page were supplied by the user 2026-10-30 (cref:14); Simply Love's course handling was read only in part (cref:19, 2026-11-22);
    the parser test re-types the driver loop that mimics LoadFromMsd; nothing was run in game.

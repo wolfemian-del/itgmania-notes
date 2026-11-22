@@ -1,6 +1,6 @@
 ITGMANIA SONG CACHE FILE FORMAT - SPEC FOR THE FEATURE EXTRACTOR (v1.3.0)
 =========================================================================
-REVISION: 2026-10-31-a | file: notes/itgmania_cache_format_spec.txt
+REVISION: 2026-11-22-a | file: notes/itgmania_cache_format_spec.txt
 
 FILE STATUS
  status:     REFERENCE
@@ -45,7 +45,7 @@ Used by: extract_chart_features.py (stage 2).
  
 3. TAG FORMATS
   - #METER: integer. #DIFFICULTY: Beginner|Easy|Medium|Hard|Challenge|Edit.
-  - #STEPSTYPE: e.g. dance-single, dance-double.
+  - #STEPSTYPE: e.g. dance-single, dance-double. Full list of recognized values: section 6.
   - #RADARVALUES: comma list, NUM_PLAYERS (2) x 14 floats = 28 values; the
     loader splits the list evenly by player count, so read length/2 per
     player. Order per player: Stream, Voltage, Air, Freeze, Chaos, Notes,
@@ -100,3 +100,58 @@ Used by: extract_chart_features.py (stage 2).
   (members differ in peak NPS, notes or tech counts; catches the stop/warp
   blind spot). hash_status is separate from "flags" so a missing hash never
   drops a chart from fitting.
+
+5b. HASH ACCESS FROM LUA, AND HOW SIMPLY LOVE USES IT (read 2026-11-22; engine v1.3.0 8a3bf8884a, Simply Love dd06138)
+  - The engine exposes the stored values to Lua: Steps:GetGrooveStatsHash() and Steps:GetGrooveStatsHashVersion()
+    [CODE: Steps.cpp 1259-1260; C++ getters 732-737]. A chart with no cached hash returns "" and version 0
+    (constructor defaults, Steps.cpp 114-115) [CODE].
+  - Simply Love does NOT call GetGrooveStatsHash [CODE: git grep over dd06138 finds no use]. It recomputes the 16-hex hash
+    by parsing the simfile (ComputeChartHash, Scripts/SL-ChartParser.lua:357-391, CRYPTMAN:SHA1String of note string +
+    BPMs, first 16 chars). Its constant ChartHashVersion = 3 (Scripts/SL_Init.lua:469) equals the engine's
+    CURRENT_GROOVE_STATS_HASH_VERSION [CODE]. Whether the two computations always agree byte for byte was not tested [UNVERIFIED].
+  - Simply Love's GrooveStats requests (base https://apiservice.groovestats.com/api/, SL-Helpers-GrooveStats.lua:44):
+    ?action=newSession (ScreenSystemLayer overlay.lua:485), playerScores (ScreenSelectMusic overlay/PaneDisplay.lua:309),
+    playerLeaderboards (overlay/Leaderboard.lua:373, ScreenGameplay underlay Scorebox.lua:305), scoreSubmit
+    (ScreenEvaluation common/Shared/AutoSubmitScore.lua:424) [CODE]. Course mode makes no request (PaneDisplay.lua:71) [CODE].
+  - API key: <profile dir>/GrooveStats.ini, section [GrooveStats], key ApiKey; a value whose length is not exactly 64 is
+    discarded (SL-Helpers-GrooveStats.lua:208-232) [CODE]. Other keys read there: Username, IsPadPlayer.
+  - NOT verified: the service's response fields, rate limits, whether newSession is required before other calls, and what
+    the service permits third-party clients to do [UNVERIFIED]. A report that lists response fields (rank, score, isSelf, ...)
+    was supplied to the project; those fields were not checked against the theme here.
+
+6. #STEPSTYPE VALUES (read 2026-11-22; engine v1.3.0 8a3bf8884a)
+  [CODE: GameManager.cpp g_StepsTypeInfos[]; GameConstantsAndTypes.h enum StepsType, StepsTypeCategory; Steps.h]
+  The string in #STEPSTYPE is the szName of one row of g_StepsTypeInfos. The enum has the same 18 members in the same order.
+  Columns: string | tracks | category | bAllowAutogen
+    dance-single      4   Single   true
+    dance-double      8   Double   true
+    dance-couple      8   Couple   true
+    dance-solo        6   Single   true
+    dance-threepanel  3   Single   true
+    dance-routine     8   Routine  FALSE  (the source has a comment noting this one differs from pump-routine)
+    pump-single       5   Single   true
+    pump-halfdouble   6   Double   true
+    pump-double       10  Double   true
+    pump-couple       10  Couple   true
+    pump-routine      10  Routine  true
+    techno-single4    4   Single   true
+    techno-single5    5   Single   true
+    techno-single8    8   Single   true
+    techno-double4    8   Double   true
+    techno-double5    10  Double   true
+    techno-double8    16  Double   true
+    lights-cabinet    NUM_CabinetLight  Single  FALSE (comment: lights autogen disabled for now)
+  - Matching is case-insensitive: GameManager::StringToStepsType lowercases its argument, then compares with szName
+    (GameManager.cpp:1692-1702) [CODE]. Anything not in the table returns StepsType_Invalid.
+  - The loader keeps the original string whatever it is: SetStepsType sets m_StepsType from StringToStepsType and
+    m_StepsTypeStr to the raw tag text (NotesLoaderSSC.cpp:296-300) [CODE].
+  - Steps with an Invalid type are not dropped. Steps::TidyUpData logs "Detected steps with unknown style" and leaves the
+    type Invalid (Steps.cpp:286-300; comment: forward compatibility, so editing a simfile with a future style does not delete
+    those steps). Song::AddSteps puts them in m_UnknownStyleSteps instead of m_vpSteps / m_vpStepsByType
+    (Song.cpp:1829-1841), so they are kept for rewriting but are not in the normal chart lists [CODE].
+    Consequence for readers of the cache: whether unknown-style steps are written to the cache file was NOT read
+    (Song.cpp 1266 and 1305 iterate m_UnknownStyleSteps) [UNVERIFIED]; check: put a chart with an invented #STEPSTYPE in a test
+    pack, reload, and look for it in the Cache/Songs file.
+  - The families kb7, ez2, para, beat, pop'n, maniax and others older StepMania builds had are not in this table [CODE].
+    "para" -> "para-single" is handled separately for profile loading (score_matching:4).
+  - "Versus" is a play style over dance-single charts, not a #STEPSTYPE; not re-read in this pass [UNVERIFIED].

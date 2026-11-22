@@ -1,5 +1,5 @@
 ITGMANIA COURSE (.crs) FORMAT - REFERENCE FROM SOURCE (supported / unsupported behaviour)
-REVISION: 2026-10-31-b | file: notes/itgmania_course_format_reference.txt | prefix: cref
+REVISION: 2026-11-22-a | file: notes/itgmania_course_format_reference.txt | prefix: cref
 
 FILE STATUS
   Status:     ACTIVE; OPEN-CHECKS. Read-only code analysis plus one synthetic parser test. In-game checks (section 16) 2026-10-30:
@@ -458,6 +458,28 @@ FILE STATUS
 
 18. OPEN / NEXT
   - User: (Reddit thread and PR #173 page received, section 14); run M1-M11 with the generated test pack (tools/course/make_cref_test_pack.py).
-  - Not read: Simply Love course screens/Lua; path resolution of #BANNER; SORT semantics; hide-lights level.
+  - Simply Love course screens/Lua: partly read 2026-11-22, see section 19. Not read: path resolution of #BANNER; SORT semantics; hide-lights level.
   - Possible patches (none written): fix the "||" tag chain; write GENRE/min-0 ranges to the cache; correct
     Docs/CourseFormat.txt (D1-D3).
+
+19. SIMPLY LOVE COURSE HANDLING (dd06138 = v5.9.0, itgmania-release; read 2026-11-22; nothing run in game)
+  Scope: which engine Course/Trail data the theme shows and records. Reading was by file existence plus targeted lines; the
+  display details marked [UNVERIFIED] below were reported to the project but not re-read.
+  [CODE, verified 2026-11-22]
+  - No theme parser of raw .crs text and no theme-only .crs tag was found; the theme reads the engine's Course/Trail objects
+    (GetCurrentCourse, GetCurrentTrail, GetCourseEntries, GetMeter, GetDisplayFullTitle, GetScripter, GetDescription,
+    GetCourseDir, HasBanner) per the report; the files involved exist: BGAnimations/ScreenSelectMusic overlay/banner.lua,
+    SongDescription/SongDescription.lua, StepsDisplayList/CourseContentsList.lua, PaneDisplay.lua, and
+    Graphics/MusicWheelItem Course NormalPart.lua.
+  - PaneDisplay.lua:17-18 picks Course / Trail in course mode; line 71: "we don't run the RequestResponseActor in CourseMode",
+    so no GrooveStats request is made for courses (see cache_format_spec 5b).
+  - Favorites are song-only: SL-FavoritesHandler.lua:20 acts only when GAMESTATE:GetCurrentSong() exists.
+  - Played courses are written to the profile's SL-Scores JSON with Course.Path (course dir), FullTitle, TranslitFullTitle,
+    Scripter and Description, and a Trail block (SL-CustomScores.lua:100-103 and following).
+  - Player option LifeMeterType exists (SL-PlayerOptions.lua:799). How it interacts with #LIVES / #GAINSECONDS courses was
+    not traced [UNVERIFIED]; check: Oni course with #LIVES:4 while LifeMeterType is bar, and Survival with #GAINSECONDS.
+  [UNVERIFIED, reported not re-read]
+  - Select screen shows banner (fallback graphic when none), entry count, total length, BPM, trail meter and a contents list
+    ("??????????" for an unresolved entry); #LIVES, course type, description and scripter are not painted on select.
+  - Course-wheel title source (metrics vs Course:GetDisplayFullTitle) and whether any module writes course list files.
+  Implication [INFERRED]: nothing the theme does adds a tag a course writer must satisfy beyond cref sections 4-7.
