@@ -1,6 +1,6 @@
 ITGMANIA "SERIES" FEATURE - WORKING NOTES (v1.3.0)
 ==================================================
-REVISION: 2026-11-22-a | file: notes/itgmania_series_notes.txt | bytes: 26368
+REVISION: 2026-11-22-a | file: notes/itgmania_series_notes.txt | bytes: 27158
 
 FILE STATUS
  status:     REFERENCE (complete)
@@ -10,7 +10,7 @@ FILE STATUS
  see also:   engine:3, 3a; beta:7r
  (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
 
-Rev 2026-11-22-a: section 13 added (pack and series view research for the Librarian app; refines sections 2-5 and 12; nothing run).
+Rev 2026-11-22-a: sections 2, 3, 10 corrected in place; section 13 added (pack and series view research for the Librarian app; refines sections 2-5 and 12; nothing run).
 Rev 2026-10-31-a: correction blocks in sections 3, 12c, 12g, 12h merged to current state (history: engine notes section 8); no new findings.
  
 Basis:    Source code of itgmania/itgmania at tag v1.3.0
@@ -73,10 +73,13 @@ SeriesBanner=
   FOLDER that contains this Pack.ini. [CODE: SongManager.cpp, the
   GetDirListing call builds sDir + sGroupDirName + "/" + SeriesBanner]
   Because it goes through GetDirListing, it is treated as a file pattern,
-  so a wildcard such as "series-banner.*" should match. [INFERRED]
+  so a wildcard such as "series-banner.*" matches. [CODE, upgraded from
+  [INFERRED] 2026-11-22: one or two "*" allowed, no other wildcard, "?" is
+  literal, match is case-insensitive; RageUtil_FileDB.cpp:24-30,76-88,251-278]
   Unlike the pack's own Banner, there is no automatic fallback search for
-  *.png / *.jpg in the folder. If the path matches no file, the key is
-  simply ignored for that pack. [CODE]
+  *.png / *.jpg in the folder. If the path matches no entry, the key is
+  simply ignored for that pack. [CODE] A folder with that name also counts as
+  a match; nothing checks that it is an image (see 13b).
  
 Version=   (REQUIRED for anything in the file to be read)
   If the [Group] section has no non-empty Version value, the ENTIRE
@@ -104,8 +107,9 @@ is case-sensitive; whether that matters depends on the OS filesystem.
  GetSeriesBannerPath ~lines 834-857]
  
   a) As each pack loads, if it has a Series, it is added to that series.
-  b) The first loaded pack whose SeriesBanner resolves to a real file
-     "wins"; later packs' SeriesBanner values are ignored for that series.
+  b) The first loaded pack whose SeriesBanner resolves "wins" ("resolves" =
+     the directory listing returns at least one entry, file OR folder, not
+     necessarily an image; see 13b; corrected 2026-11-22); later packs' SeriesBanner values are ignored for that series.
      A pack whose SeriesBanner matches nothing does not block a later pack
      from supplying one.
   c) If no pack in the series supplies a working SeriesBanner, the series
@@ -113,6 +117,9 @@ is case-sensitive; whether that matters depends on the OS filesystem.
      (plain string comparison, so it is case-sensitive/byte order).
      Note: the commit message calls this "the first pack"; in the code it
      is the alphabetically first folder name, not necessarily load order.
+     That pack's banner is used even if it is empty: the fallback does not
+     skip bannerless packs and look at a later pack. [CODE
+     SongManager.cpp:855-857; added 2026-11-22]
  
 "First loaded" in (b) [CODE: SongManager.cpp LoadSongDir, AddGroup; RageUtil.cpp;
  StdString.h. Corrected 2026-09-29 and 2026-10-03]:
@@ -266,10 +273,12 @@ of date; it omits SeriesBanner.
 10. THINGS I WOULD CHECK IN-GAME BEFORE PUBLISHING
 --------------------------------------------------
   1. Two packs with the same Series but different capitalization: one
-     parent row or two?
+     parent row or two? [2026-11-22 [INFERRED]: separate series, possibly
+     repeated parent rows; see 13c and 13e G2.]
   2. SeriesBanner defined in two different packs (try folder names 'Zeta'
      and 'alpha'): per the code, 'Zeta' should win (byte order).
-  3. SeriesBanner wildcard (e.g. "*.png") actually matching.
+  3. SeriesBanner wildcard (e.g. "*.png") actually matching. [Read in source
+     2026-11-22 as [CODE]: it matches. In game still unrun; see 13e G3.]
   4. A standalone pack titled between two series names: where it lands.
   5. Whether your theme's sort menu actually offers the Series sort.
   6. What the parent-row count displays with a style that filters out
