@@ -1,16 +1,17 @@
 ITGMANIA "SERIES" FEATURE - WORKING NOTES (v1.3.0)
 ==================================================
-REVISION: 2026-10-31-a | file: notes/itgmania_series_notes.txt | bytes: 21759
+REVISION: 2026-11-22-a | file: notes/itgmania_series_notes.txt | bytes: 26368
 
 FILE STATUS
  status:     REFERENCE (complete)
- basis:      v1.3.0 8a3bf8884a; section 12 = beta e4b4bf0755
+ basis:      v1.3.0 8a3bf8884a; section 12 = beta e4b4bf0755; section 13 = v1.3.0 re-read + beta 9778a4e36a spot-check
  topic key:  series
  read when:  working on Pack.ini Series / SeriesBanner or SORT_SERIES
  see also:   engine:3, 3a; beta:7r
  (FILE STATUS block added 2026-10-31; the original header follows unchanged.)
 
-Rev -a: correction blocks in sections 3, 12c, 12g, 12h merged to current state (history: engine notes section 8); no new findings.
+Rev 2026-11-22-a: section 13 added (pack and series view research for the Librarian app; refines sections 2-5 and 12; nothing run).
+Rev 2026-10-31-a: correction blocks in sections 3, 12c, 12g, 12h merged to current state (history: engine notes section 8); no new findings.
  
 Basis:    Source code of itgmania/itgmania at tag v1.3.0
           (commit 8a3bf8884a), read on 2026-09-29, plus the git log.
@@ -412,3 +413,33 @@ Read from source; not run.
        - Grep of src/ for other SORT_ range comparisons: none besides
          IsSongSort (pattern-based, not exhaustive).
      Not run. Still unchecked: any third-party theme's numeric use.
+
+13. REFINEMENTS FROM THE PACK AND SERIES VIEW RESEARCH (2026-11-22)
+   Basis: v1.3.0 8a3bf8884a re-read. Beta head 9778a4e36a spot-checked only. Nothing run; no [TESTED]/[OBSERVED] here.
+   Context: ITGmania-librarian roadmap theme 2 (pack and series view). Full report was attached by the owner, not stored here.
+ 13a. Pack.ini parsing (src/Group.cpp:78-148, src/IniFile.cpp:37-114)
+   - Section header must start with "[" and end with "]"; name is untrimmed and case-sensitive. "  [Group]" or "[Group] " is not a section [INFERRED from IniFile.cpp:80-89]. [CODE for the lines]
+   - Keys are exact and case-sensitive (std::map). "series=" does not match "Series". [CODE XmlFile.h:60, XmlFile.cpp:91-99]
+   - Duplicate Series= lines: the last one wins (AppendAttr returns the existing attribute, SetValue overwrites). [CODE IniFile.cpp:103, XmlFile.cpp:196-204]. Not run in game [UNVERIFIED in game].
+   - A repeated [Group] header re-opens the first section; two blocks merge. [CODE IniFile.cpp:84-87]
+   - The file is ignored entirely, Series included, unless [Group] has a non-empty Version. Any non-empty text counts. [CODE Group.cpp:87-93,142-147]
+   - Values are trimmed of \r \n \t and space only. No case folding, no normalisation. [CODE Group.cpp:108; RageUtil.cpp:1006-1016]
+   - Series is not in the song cache. [CODE grep of src/: GetSeries used only by Group, MusicWheel, SongManager, SongUtil]
+ 13b. SeriesBanner "resolves" (SongManager.cpp:399-413, 834-857; RageUtil_FileDB.cpp; RageFileManager.cpp:503-564)
+   - Resolves = GetDirListing(packdir + "/" + SeriesBanner, bOnlyDirs=false) returns at least one entry. [CODE] Supersedes the [INFERRED] wildcard remark in section 2.
+   - Match is case-insensitive; one or two "*" allowed, no other wildcard; "?" is literal. [CODE RageUtil_FileDB.cpp:24-30,76-88,251-278]
+   - A folder with that name also resolves; there is no extension check and no image load. [CODE RageUtil_FileDB.cpp:34-36]
+   - A non-empty banner that is a folder shows the fallback banner [INFERRED from Banner.cpp:63-85]; a non-image file [UNVERIFIED].
+   - Packs are visited in byte order (std::map<string>), so "Zeta" before "alpha". First pack whose SeriesBanner resolves wins. [CODE]
+   - Fallback (3c) returns the alphabetically first pack's own banner even if empty; it does not skip bannerless packs. [CODE SongManager.cpp:855-857]
+   - Empty path loads the theme fallback banner. [CODE Banner.cpp:63-85]
+ 13c. Presentation
+   - Parent rows are built from runs of consecutive songs with the same exact Series string (MusicWheel.cpp:929-930), so case variants can give repeated parent rows [INFERRED, not run].
+   - Sort key is "1"+MakeSortString(Series)+\x01+MakeSortString(SortTitle), stable sort; no pack-identity tiebreaker. [CODE SongUtil.cpp:946-975, 450-463] Two packs with the same Series and SortTitle may interleave [INFERRED].
+   - Series row shows ShortenSeriesName(Series); pack row shows DisplayTitle via ShortenGroupName; pack identity stays the folder name. [CODE MusicWheelItem.cpp:231-253; MusicWheel.cpp:951-958]
+   - v1.3.0 gives a one-pack series a parent row. [CODE MusicWheel.cpp:925-947]
+ 13d. Beta status
+   - Beta head 9778a4e36a is 163 commits past v1.3.0 (section 12 compared at e4b4bf0755, 84 commits). Members were renamed across the Series files, so whole-file diffs mostly show renames.
+   - Spot-checked on head: Group.cpp still reads Series/SeriesBanner/Version with the same trim; GetSeriesBannerPath has the same byte-order fallback; the single-group rule is present (beta:src/MusicWheel.cpp:937-944). [CODE] Everything else on beta [UNVERIFIED].
+ 13e. Open in-game checks added (v1.3.0 build, throwaway packs)
+   G1 duplicate Series= lines (predict last wins); G2 case variants A,B,C by SortTitle (predict three parent rows); G3 SeriesBanner as folder / non-image / "name.*" / missing; G4 Series= without Version= (see 10 item 7); G5 one-pack series (see 10 item 8); G6 same pack folder in two song roots with different Series= (Pack.ini precedence) [UNVERIFIED].
